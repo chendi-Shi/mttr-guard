@@ -1,0 +1,39 @@
+name: Tests and recovery drills
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.14']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit and process-crash tests
+        run: python -m unittest discover -s tests -v
+      - name: Lost response recovery drill
+        run: python -m mttr_guard --simulate-approval --fault after_submit --output artifacts/response-lost.json
+      - name: Undelivered request drill
+        run: python -m mttr_guard --simulate-approval --fault before_submit --output artifacts/not-delivered.json
+      - name: Check drill outcomes
+        run: python scripts/check_drill_reports.py artifacts/response-lost.json artifacts/not-delivered.json

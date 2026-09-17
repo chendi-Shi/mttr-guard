@@ -6,12 +6,15 @@
 
 ## 从哪里开始
 
+- [v0.2 执行可靠性](docs/execution-reliability.md)：跨系统对账、服务锁、审批撤销与进程崩溃演练。
 - [企业落地方案](docs/production-design.md)：场景、架构、职责、接口、容量、安全、试点排期。
 - [评估方案](docs/evaluation.md)：MTTR 定义、对照组、故障注入、准入条件。
 - [接入契约](docs/integration-contracts.md)：监控、证据、发布执行、审批与工作流。
 - `mttr_guard/core.py`：持久化状态机、方案/审批绑定、策略、模拟执行、恢复验证。
 - `mttr_guard/agents.py`：三个并行诊断角色、反证审查角色、规则基线与 Ollama 模型适配。
 - `mttr_guard/alertmanager.py`：带作用域检查的 Alertmanager 消息标准化。
+- `mttr_guard/execution.py`：持久化执行意图、单次派发、结果未知处理及只读对账。
+- `mttr_guard/deployment_simulator.py`：独立数据库的发布平台模拟器，支持服务端幂等、版本前置条件与故障注入。
 - `tests/`：关键失效路径测试；不需要在线模型或生产凭据。
 
 ## 本地运行
@@ -27,6 +30,12 @@ python -m mttr_guard
 # 明确使用模拟审批、模拟执行及虚拟时间，跑完整闭环
 python -m mttr_guard --simulate-approval --output artifacts/release-report.json
 
+# 发布端已完成但响应丢失：重启后按原操作 ID 对账，不重复执行
+python -m mttr_guard --simulate-approval --fault after_submit
+
+# 请求未送达：保留结果未知与服务锁，不盲目重发
+python -m mttr_guard --simulate-approval --fault before_submit
+
 # 三类不得自动回滚的故障
 python -m mttr_guard --scenario downstream
 python -m mttr_guard --scenario migration
@@ -36,11 +45,13 @@ python -m mttr_guard --scenario missing
 python -m unittest discover -s tests -v
 ```
 
-成功场景：`NEW → DIAGNOSING → AWAITING_APPROVAL → APPROVED → VERIFYING → RECOVERED`。
+默认适配器执行场景：`NEW → DIAGNOSING → AWAITING_APPROVAL → APPROVED → EXECUTING → VERIFYING → RECOVERED`。
+
+遇到执行超时或不可信回执时进入 `EXECUTION_UNKNOWN`，按原操作 ID 查询。确认成功后才能验证恢复；查不到时不自动重发。执行接纳前允许撤销审批，进入 `CANCELLED`。
 
 反证、缺失证据或模型不可用：`DIAGNOSING → ESCALATED`。验证超时同样升级人工；原型升级是持久化状态，不会实际发送通知。
 
-默认临时数据库位于 `artifacts/tmp/`，正常退出删除对应数据库文件。加 `--db artifacts/my-demo.db` 可保留状态，首次运行需使用尚未初始化模拟服务的新数据库。每次示例都重新注入同一模拟服务，因此不能重复用同一个已初始化的 DB 执行 demo；实际核心可重新实例化 Engine 读取状态和继续执行。
+默认临时数据库位于 `artifacts/tmp/`，本地事件库与独立发布模拟库正常退出后均清理。加 `--db artifacts/my-demo.db` 可保留两份状态，首次运行需使用尚未初始化模拟服务的新数据库。每次示例都重新注入同一模拟服务，因此不能重复用同一个已初始化的 DB 执行 demo；实际核心可重新实例化 Engine 读取状态并调用 `reconcile()`。`--execution-mode atomic` 可保留最初的单事务模拟方式。
 
 `--simulate-approval` 会显式创建虚拟审批人，不能用于真实审批。演示中的 90 秒是加速的虚拟时间，**不是实测恢复速度、MTTR 基准或降幅**。
 
@@ -65,13 +76,17 @@ python -m mttr_guard --model YOUR_INSTALLED_MODEL --ollama-url http://127.0.0.1:
 | 协同分析 | 3 个并行分析角色 + 1 个反证角色 | 内网模型网关、按角色回归评测、成本与容量限制 |
 | 告警接入 | Alertmanager payload 解析、作用域验证、单告警事件幂等 | 认证 HTTP receiver、可靠入队、关联聚合、分页/背压 |
 | 数据证据 | 有 ID/时间/作用域的模拟指标、调用链、变更 | 真实只读采集器、来源完整性、范围查询、脱敏 |
-| 流程持久化 | SQLite 状态与事件；可重建 Engine 继续操作 | Temporal 调度、PostgreSQL、断点恢复与分布式服务锁 |
-| 策略和审批 | 固定 Runbook、哈希绑定、5 分钟 TTL、角色/作用域检查 | IAM 认证、审批 UI/回调验签、签名策略与审批撤销 |
-| 执行 | 同一 SQLite 事务内的模拟回滚与幂等回执 | 发布平台 CAS、远端幂等键、超时对账、补偿流程 |
+| 流程持久化 | SQLite 状态与事件；执行意图、重启对账、同数据库服务锁 | Temporal 调度、PostgreSQL、跨区域租约/fencing、人工解锁流程 |
+| 策略和审批 | 固定 Runbook、哈希绑定、TTL、作用域检查、执行接纳前撤销 | IAM 认证、审批 UI/回调验签、签名策略 |
+| 执行 | 独立发布模拟库的幂等/CAS、未知结果处理、只读对账；保留旧模拟路径 | 真实发布平台适配器、远端取消、补偿与接管流程 |
 | 验证 | 错误率、P99、流量、对照组、版本、连续新样本 | 连续时间窗口、业务成功率、足量请求、持久化定时器 |
 | 审计 | 本地事件表 + JSON 导出 | 独立不可改写存储、读取/拒绝审计、权限与保留策略 |
 
-原型中的 `Principal` 是可信进程内身份对象，**不构成外部认证系统**。没有对外 HTTP 服务和生产写入适配器；不能直接把核心方法暴露成无鉴权 API。SQLite 原子性仅覆盖本地模拟副作用，不覆盖真实发布请求。
+原型中的 `Principal` 是可信进程内身份对象，**不构成外部认证系统**。没有对外 HTTP 服务和生产写入适配器；不能直接把核心方法暴露成无鉴权 API。新执行协议不依赖跨库原子事务，但其验证对象仍然是独立 SQLite 模拟平台。未知结果的服务锁不会自动过期或释放。
+
+## 自动验证
+
+GitHub Actions 在 Linux/Windows、Python 3.11/3.14 上执行测试和两条故障演练，并检查输出状态。流水线只读仓库、不使用部署凭据，官方 Actions 固定到提交版本。最新执行结果见 [Actions](https://github.com/chendi-Shi/mttr-guard/actions)。
 
 ## 为什么采用这一切入点
 

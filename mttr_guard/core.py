@@ -70,6 +70,9 @@ class Engine:
                     seq INTEGER PRIMARY KEY AUTOINCREMENT, incident TEXT NOT NULL,
                     at REAL NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS service_locks (
+                    scope TEXT PRIMARY KEY, incident TEXT NOT NULL,
+                    operation TEXT NOT NULL, acquired_at REAL NOT NULL);
                 INSERT OR IGNORE INTO config VALUES ('kill_switch', 'off');
             """)
 
@@ -215,6 +218,37 @@ class Engine:
         if actor.scope != scope or actor.role != role or not actor.subject:
             raise Rejected("Identity role or scope denied")
 
+    def _acquire_action_lock(self, db, scope, iid, operation):
+        # Also protect pre-upgrade incidents that do not have a service_locks row.
+        for row in db.execute("SELECT id,body FROM incidents WHERE scope=? AND id<>?", (scope.key, iid)):
+            other = json.loads(row["body"])
+            if other["state"] != "RECOVERED" and (other.get("receipt") or other.get("execution")):
+                if other.get("execution", {}).get("status") != "REJECTED":
+                    raise Rejected("Another incident owns the service action/observation window")
+        existing = db.execute("SELECT incident,operation FROM service_locks WHERE scope=?", (scope.key,)).fetchone()
+        if existing and (existing["incident"] != iid or existing["operation"] != operation):
+            raise Rejected("Another incident owns the service action/observation window")
+        db.execute("INSERT OR IGNORE INTO service_locks VALUES (?,?,?,?)", (scope.key, iid, operation, self.clock()))
+
+    def _release_action_lock(self, db, scope, iid):
+        db.execute("DELETE FROM service_locks WHERE scope=? AND incident=?", (scope.key, iid))
+
+    def _execution_preflight(self, db, inc, scope, actor, plan_hash):
+        if db.execute("SELECT value FROM config WHERE key='kill_switch'").fetchone()[0] == "on":
+            raise Rejected("Global execution kill switch is on")
+        plan = self._validate_plan(inc)
+        if inc["state"] != "APPROVED" or plan_hash != plan["hash"] or not inc["approval"] or inc["approval"]["plan_hash"] != plan_hash:
+            raise Rejected("Execution requires approval bound to this plan")
+        if actor.subject == inc["approval"]["subject"]:
+            raise Rejected("Approver cannot be the executor identity")
+        service = self._service(db, scope)
+        reason = self._candidate_blocker(service, inc["evidence"])
+        if reason or service["revision"] != plan["expected_revision"] or service["previous_revision"] != plan["target_revision"] or service["traffic_percent"] != plan["traffic_percent"]:
+            raise Rejected(reason or "Deployment drift invalidated approval")
+        if not 0 <= self.clock() - service["observed_at"] <= 60:
+            raise Rejected("Preflight telemetry is stale")
+        return plan, service
+
     def _validate_plan(self, inc):
         plan = inc["plan"]
         if not plan or plan["hash"] != digest({k: v for k, v in plan.items() if k != "hash"}):
@@ -246,6 +280,35 @@ class Engine:
             db.execute("UPDATE config SET value=? WHERE key='kill_switch'", ("on" if enabled else "off",))
             self.event(db, "SYSTEM", "KILL_SWITCH", {"enabled": enabled})
 
+    def revoke_approval(self, iid: str, scope: Scope, actor: Principal, plan_hash: str, reason: str):
+        """Cancel before admission. Already admitted remote actions need reconciliation."""
+        self._authorize(actor, scope, "approver")
+        if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 1000:
+            raise Rejected("A bounded revocation reason is required")
+        with self.tx() as db:
+            inc = self._load(db, iid, scope)
+            if not inc["plan"] or inc["plan"]["hash"] != plan_hash:
+                raise Rejected("Revocation plan mismatch")
+            if inc["state"] == "CANCELLED":
+                return inc
+            if inc["state"] not in {"AWAITING_APPROVAL", "APPROVED"}:
+                raise Rejected("Action already admitted; revoke cannot cancel remote side effects")
+            inc["state"] = "CANCELLED"
+            inc["revocation"] = {"subject": actor.subject, "at": self.clock(), "plan_hash": plan_hash, "reason": reason}
+            self._save(db, inc)
+            self.event(db, iid, "APPROVAL_REVOKED", inc["revocation"])
+            return inc
+
+    def dispatch(self, iid, scope, actor, plan_hash, adapter):
+        """Persist intent, dispatch once, retain uncertainty. Returns the incident."""
+        from .execution import dispatch
+        return dispatch(self, iid, scope, actor, plan_hash, adapter)
+
+    def reconcile(self, iid, scope, actor, adapter):
+        """Read remote operation status; never re-submit a write. Returns the incident."""
+        from .execution import reconcile
+        return reconcile(self, iid, scope, actor, adapter)
+
     def execute(self, iid: str, scope: Scope, actor: Principal, plan_hash: str):
         self._authorize(actor, scope, "executor")
         with self.tx() as db:
@@ -254,19 +317,8 @@ class Engine:
                 if inc["receipt"]["plan_hash"] != plan_hash:
                     raise Rejected("Idempotency key mismatch")
                 return inc["receipt"]
-            if db.execute("SELECT value FROM config WHERE key='kill_switch'").fetchone()[0] == "on":
-                raise Rejected("Global execution kill switch is on")
-            plan = self._validate_plan(inc)
-            if inc["state"] != "APPROVED" or plan_hash != plan["hash"] or inc["approval"]["plan_hash"] != plan_hash:
-                raise Rejected("Execution requires approval bound to this plan")
-            if actor.subject == inc["approval"]["subject"]:
-                raise Rejected("Approver cannot be the executor identity")
-            service = self._service(db, scope)
-            reason = self._candidate_blocker(service, inc["evidence"])
-            if reason or service["revision"] != plan["expected_revision"] or service["previous_revision"] != plan["target_revision"] or service["traffic_percent"] != plan["traffic_percent"]:
-                raise Rejected(reason or "Deployment drift invalidated approval")
-            if not 0 <= self.clock() - service["observed_at"] <= 60:
-                raise Rejected("Preflight telemetry is stale")
+            plan, service = self._execution_preflight(db, inc, scope, actor, plan_hash)
+            self._acquire_action_lock(db, scope, iid, digest([iid, plan_hash]))
             # Simulator ONLY: update, execution receipt and workflow transition are atomic.
             # A real adapter needs remote idempotency + precondition CAS + reconciliation.
             service["revision"] = plan["target_revision"]
@@ -280,12 +332,14 @@ class Engine:
             self.event(db, iid, "SIMULATED_ACTION_EXECUTED", inc["receipt"])
             return inc["receipt"]
 
-    def simulate_observation(self, scope: Scope, healthy: bool, qps: float = 1000):
+    def simulate_observation(self, scope: Scope, healthy: bool, qps: float = 1000, revision: str | None = None):
         """Advance independent simulated telemetry; execution does not auto-heal metrics."""
         with self.tx() as db:
             service = self._service(db, scope)
             service["observed_at"] = self.clock()
             service["metrics"].update(error_rate=.003 if healthy else .18, p99_ms=180 if healthy else 2400, qps=qps)
+            if revision is not None:
+                service["revision"] = revision
             self._write_service(db, scope, service)
 
     def verify(self, iid: str, scope: Scope):
@@ -296,14 +350,16 @@ class Engine:
             service = self._service(db, scope)
             now, stamp = self.clock(), service["observed_at"]
             execution_at = inc["receipt"]["executed_at"]
+            v = inc["plan"]["runbook"]["verification"]
             if now - execution_at > 600:
                 inc["state"], inc["escalation_reason"] = "ESCALATED", "Verification timed out; no automatic second action"
             elif stamp <= execution_at or not 0 <= now - stamp <= 60:
                 raise Rejected("Recovery needs fresh, post-execution telemetry")
-            elif inc["observations"] and stamp - inc["observations"][-1]["at"] < 30:
+            elif inc["observations"] and stamp - inc["observations"][-1]["at"] < v["min_interval_seconds"]:
                 raise Rejected("Duplicate or too closely spaced telemetry window")
             else:
-                m, v = service["metrics"], RUNBOOK["verification"]
+                # Continue using the policy that was approved, even after policy upgrades.
+                m = service["metrics"]
                 healthy = (m["error_rate"] < v["max_error_rate"] and m["p99_ms"] < v["max_p99_ms"]
                            and m["control_error_rate"] < v["max_error_rate"]
                            and m["qps"] >= service["baseline_qps"] * v["min_qps_ratio"]
@@ -315,6 +371,7 @@ class Engine:
                     inc["state"] = "RECOVERED"
                     inc["recovered_at"] = stamp
                     inc["recovery_seconds"] = stamp - inc["detected_at"]
+                    self._release_action_lock(db, scope, iid)
             self._save(db, inc)
             self.event(db, iid, "VERIFICATION", {"state": inc["state"], "observations": inc["observations"][-3:]})
             return inc

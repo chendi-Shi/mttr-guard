@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import urllib.request
 from dataclasses import asdict, dataclass
@@ -109,7 +110,8 @@ async def investigate(reasoner, evidence: list[dict], budget: float = 25) -> lis
     async def one(role, selected, prior):
         try:
             async with asyncio.timeout(budget):
-                finding = await reasoner.analyze(role, selected, prior)
+                # A plugin/role must not mutate another role's evidence or the plan input.
+                finding = await reasoner.analyze(role, copy.deepcopy(selected), list(prior))
                 return validate_finding(role, {
                     "verdict": finding.verdict, "evidence_ids": list(finding.evidence_ids), "summary": finding.summary,
                 }, selected)

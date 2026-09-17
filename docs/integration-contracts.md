@@ -1,6 +1,6 @@
 # 生产接入契约与实现路线
 
-本文定义待实现的生产接口，不代表当前已有 HTTP 服务。原型函数见 `Engine` 与 `ingest_webhook`。
+本文定义待实现的生产接口，不代表当前已有 HTTP 服务。原型函数见 `Engine` 与 `ingest_webhook`。v0.2 的 `dispatch/reconcile/revoke_approval` 已实现对应的进程内协议及独立发布模拟器，详见 [执行可靠性](execution-reliability.md)。
 
 ## 1. 告警平台 → Receiver
 
@@ -51,7 +51,7 @@
 
 同意/拒绝/撤销均写事件；执行前查询最终有效审批。超过 TTL 或服务新版本出现时，原审批失效。界面至少展示作用域、当前/目标版本、影响范围、证据来源、Runbook 版本、回退限制和验证条件。执行器不得把“同意排查”解读为“同意回滚”。
 
-原型 `approve()` 接受可信的 `Principal`，只有同作用域 approver 能审批准确 plan hash；它没有回调验签、审批撤销、组织目录或 Web UI。
+原型 `approve()` 接受可信的 `Principal`，只有同作用域 approver 能审批准确 plan hash；`revoke_approval()` 支持执行接纳前撤销，但没有回调验签、组织目录或 Web UI。
 
 ## 4. 执行器 → 企业发布平台
 
