@@ -37,3 +37,11 @@ jobs:
         run: python -m mttr_guard --simulate-approval --fault before_submit --output artifacts/not-delivered.json
       - name: Check drill outcomes
         run: python scripts/check_drill_reports.py artifacts/response-lost.json artifacts/not-delivered.json
+      - name: Read-only pilot HTTP and recovery drill
+        run: python -m scripts.run_pilot_drill
+      - name: Install hardened runtime and test dependencies
+        run: python -m pip install -r requirements-enterprise.txt
+      - name: Authentication, audit and operational tests
+        run: python -m unittest discover -s tests -v
+      - name: Separate API/worker process and backup recovery drill
+        run: python -m scripts.run_enterprise_drill

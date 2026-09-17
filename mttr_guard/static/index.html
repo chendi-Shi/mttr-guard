@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MTTR Guard · 值班工作台</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header><div><strong>MTTR GUARD</strong><span>值班工作台</span></div><span id="identity">未连接</span></header>
+<main>
+<section id="login"><h1>把证据、处置与恢复放在一起</h1><p>接收告警后自动汇集证据。你在现有平台完成处置，这里持续验证恢复并记录耗时。</p><form id="login-form"><label for="token">访问令牌</label><div class="login-row"><input id="token" type="password" autocomplete="off" required placeholder="输入服务令牌或企业签发的 API 访问令牌"><button>连接工作台</button></div><label for="service-selection">服务 ID（有多个服务权限时填写）</label><input id="service-selection" autocomplete="off" placeholder="单服务账号可留空，例如 checkout"></form><p class="muted">令牌仅保留在本页内存，刷新或退出页面后清除。</p></section>
+<div id="workspace" hidden>
+<div class="toolbar"><div><h1>故障处置</h1><p id="mode"></p></div><div><button id="reload" class="secondary">刷新</button><button id="logout" class="secondary">退出</button></div></div>
+<section id="measurement"></section>
+<div class="layout"><aside><div id="incidents"></div><button id="more" class="secondary" hidden>加载更早事件</button></aside><article id="detail"><p class="muted">选择事件查看证据和处置步骤。</p></article></div>
+</div><p id="error" role="alert"></p>
+</main><script src="/app.js"></script>
+</body></html>

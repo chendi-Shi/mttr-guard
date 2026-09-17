@@ -234,6 +234,8 @@ class Engine:
         db.execute("DELETE FROM service_locks WHERE scope=? AND incident=?", (scope.key, iid))
 
     def _execution_preflight(self, db, inc, scope, actor, plan_hash):
+        if inc.get("mode", "SIMULATED") != "SIMULATED":
+            raise Rejected("Read-only pilot incidents cannot use simulated execution")
         if db.execute("SELECT value FROM config WHERE key='kill_switch'").fetchone()[0] == "on":
             raise Rejected("Global execution kill switch is on")
         plan = self._validate_plan(inc)

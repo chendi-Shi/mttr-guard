@@ -44,7 +44,7 @@ class RuleReasoner:
         elif role == "traces":
             verdict = "local_failure" if d["traces"]["downstream_healthy"] else "downstream_failure"
         elif role == "changes":
-            verdict = "recent_change" if d["changes"]["seconds_before_alert"] in range(0, 901) else "no_change"
+            verdict = "recent_change" if 0 <= d["changes"]["seconds_before_alert"] <= 900 else "no_change"
         else:
             acceptable = {"metrics": "regression", "traces": "local_failure", "changes": "recent_change"}
             verdict = "candidate" if all(f.verdict == acceptable[f.agent] for f in prior) and len(prior) == 3 and not d["changes"]["schema_migration"] else "veto"

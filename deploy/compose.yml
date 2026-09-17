@@ -1,0 +1,52 @@
+# Single-host supervision, NOT multi-host HA. Terminate TLS at your existing gateway.
+name: mttr-guard
+x-runtime: &runtime
+  build:
+    context: ..
+  image: mttr-guard:0.4-local
+  init: true
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 128
+  mem_limit: 768m
+  cpus: 1.0
+  stop_grace_period: 85s
+  tmpfs: [/tmp:size=64m,mode=1777]
+  environment:
+    MTTR_AUDIT_KEY_FILE: /run/secrets/audit_key
+  env_file:
+    - ${MTTR_CONNECTOR_ENV_FILE:?Set a file containing read-only connector environment credentials}
+  volumes:
+    - data:/data
+    - type: bind
+      source: ${MTTR_CONFIG_DIRECTORY:?Set a directory containing enterprise.local.json}
+      target: /config
+      read_only: true
+    - type: bind
+      source: ${MTTR_AUTH_DIRECTORY:?Set a directory containing auth token files}
+      target: /auth
+      read_only: true
+  secrets: [audit_key]
+services:
+  api:
+    <<: *runtime
+    command: [api, --config, /config/enterprise.local.json, --db, /data/pilot.db, --host, 0.0.0.0]
+    ports: [127.0.0.1:8787:8787]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+  diagnose:
+    <<: *runtime
+    command: [worker, --config, /config/enterprise.local.json, --db, /data/pilot.db, --queue, diagnose]
+  observe:
+    <<: *runtime
+    command: [worker, --config, /config/enterprise.local.json, --db, /data/pilot.db, --queue, observe]
+volumes:
+  data:
+secrets:
+  audit_key:
+    file: ${MTTR_AUDIT_KEY_PATH:?Set the stable audit key file path}

@@ -1,6 +1,6 @@
 # 生产接入契约与实现路线
 
-本文定义待实现的生产接口，不代表当前已有 HTTP 服务。原型函数见 `Engine` 与 `ingest_webhook`。v0.2 的 `dispatch/reconcile/revoke_approval` 已实现对应的进程内协议及独立发布模拟器，详见 [执行可靠性](execution-reliability.md)。
+本文定义完整生产系统的目标契约。v0.3 已实现其中的只读 HTTP 试点：认证告警接收、原子排队、Prometheus/证据网关采集、人工审核记录和持久化恢复观察，实际接口与边界见 [只读试点](read-only-pilot.md)。下文涉及线上执行审批、企业 IAM、跨区域协调等仍是目标设计。v0.2 的 `dispatch/reconcile/revoke_approval` 为进程内协议及独立发布模拟器，详见 [执行可靠性](execution-reliability.md)。
 
 ## 1. 告警平台 → Receiver
 

@@ -1,0 +1,7 @@
+**
+!Dockerfile
+!requirements-enterprise.txt
+!mttr_guard/
+!mttr_guard/**
+mttr_guard/**/__pycache__/
+mttr_guard/**/*.pyc

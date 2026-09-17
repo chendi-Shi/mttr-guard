@@ -1,0 +1,24 @@
+groups:
+  - name: mttr-guard-self
+    rules:
+      - alert: MTTRGuardUnavailable
+        expr: up{job="mttr-guard"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: MTTR Guard scrape failed; continue using the existing on-call tools
+      - alert: MTTRGuardWorkerMissing
+        expr: mttr_guard_ready == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Diagnosis or recovery observation queue has no recent worker
+      - alert: MTTRGuardRecoveryObservationDelayed
+        expr: max by (job, instance) (mttr_guard_oldest_due_seconds{kind="observe"}) > 60
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Recovery verification is delayed; inspect worker health and manually watch the service

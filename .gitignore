@@ -5,3 +5,9 @@ __pycache__/
 *.db-wal
 .env
 artifacts/
+config/*.local.json
+*.token
+.venv/
+*.egg-info/
+build/
+dist/

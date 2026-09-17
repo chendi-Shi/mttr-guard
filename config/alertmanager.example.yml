@@ -1,0 +1,25 @@
+# Place the pilot behind your internal TLS reverse proxy. Labels must match the
+# configured scope. File contains ONLY the receiver token, not an operator token.
+route:
+  receiver: existing-oncall
+  routes:
+    - receiver: mttr-guard-checkout
+      matchers:
+        - tenant="commerce"
+        - environment="staging"
+        - cluster="cn-east-1"
+        - namespace="trade"
+        - service="checkout"
+      continue: true
+    - receiver: existing-oncall
+receivers:
+  - name: existing-oncall
+    # Keep your existing paging integration here; the pilot does not replace it.
+  - name: mttr-guard-checkout
+    webhook_configs:
+      - url: https://mttr-guard.example.internal/v1/webhooks/alertmanager
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/secrets/mttr-checkout.token

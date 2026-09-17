@@ -8,7 +8,9 @@ from datetime import datetime
 from .core import Rejected, Scope, digest
 
 
-def ingest_webhook(engine, scope: Scope, payload: dict) -> list[str]:
+def normalize_webhook(scope: Scope, payload: dict, now: float) -> list[tuple[str, float]]:
+    if not isinstance(payload, dict):
+        raise Rejected("Expected an Alertmanager object")
     alerts = payload.get("alerts")
     if not isinstance(alerts, list) or len(alerts) > 100:
         raise Rejected("Expected at most 100 alerts")
@@ -34,7 +36,12 @@ def ingest_webhook(engine, scope: Scope, payload: dict) -> list[str]:
         except (ValueError, KeyError, TypeError, AttributeError) as exc:
             raise Rejected("Invalid startsAt") from exc
         fingerprint = alert.get("fingerprint") or digest(labels)
-        if not isinstance(fingerprint, str) or not 0 < len(fingerprint) <= 256 or not 0 <= stamp <= engine.clock():
+        if not isinstance(fingerprint, str) or not 0 < len(fingerprint) <= 256 or not 0 <= stamp <= now:
             raise Rejected("Invalid alert identity or time")
         normalized.append((fingerprint, stamp))
-    return [engine.ingest(scope, fingerprint, stamp) for fingerprint, stamp in normalized]
+    return normalized
+
+
+def ingest_webhook(engine, scope: Scope, payload: dict) -> list[str]:
+    return [engine.ingest(scope, fingerprint, stamp)
+            for fingerprint, stamp in normalize_webhook(scope, payload, engine.clock())]

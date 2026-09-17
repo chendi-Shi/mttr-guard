@@ -1,0 +1,74 @@
+{
+  "services": [
+    {
+      "id": "checkout",
+      "scope": {
+        "tenant": "commerce",
+        "environment": "staging",
+        "cluster": "cn-east-1",
+        "namespace": "trade",
+        "service": "checkout"
+      },
+      "owner": "Checkout on-call",
+      "mode": "READ_ONLY",
+      "prometheus_url": "https://prometheus.example.internal",
+      "evidence_url": "https://evidence.example.internal/v1/checkout",
+      "prometheus_token_env": "MTTR_PROMETHEUS_TOKEN",
+      "evidence_token_env": "MTTR_EVIDENCE_TOKEN",
+      "baseline_qps": 1000,
+      "policy": {
+        "window_seconds": 60,
+        "consecutive_windows": 3,
+        "min_requests": 100,
+        "max_sample_age_seconds": 30
+      },
+      "queries": {
+        "error_rate": "sum(rate(http_requests_total{tenant=\"commerce\",environment=\"staging\",cluster=\"cn-east-1\",namespace=\"trade\",service=\"checkout\",track=\"canary\",status=~\"5..\"}[1m])) / sum(rate(http_requests_total{tenant=\"commerce\",environment=\"staging\",cluster=\"cn-east-1\",namespace=\"trade\",service=\"checkout\",track=\"canary\"}[1m]))",
+        "control_error_rate": "sum(rate(http_requests_total{tenant=\"commerce\",environment=\"staging\",cluster=\"cn-east-1\",namespace=\"trade\",service=\"checkout\",track=\"stable\",status=~\"5..\"}[1m])) / sum(rate(http_requests_total{tenant=\"commerce\",environment=\"staging\",cluster=\"cn-east-1\",namespace=\"trade\",service=\"checkout\",track=\"stable\"}[1m]))",
+        "p99_ms": "1000 * histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{tenant=\"commerce\",environment=\"staging\",cluster=\"cn-east-1\",namespace=\"trade\",service=\"checkout\",track=\"canary\"}[1m])))",
+        "qps": "sum(rate(http_requests_total{tenant=\"commerce\",environment=\"staging\",cluster=\"cn-east-1\",namespace=\"trade\",service=\"checkout\",track=\"canary\"}[1m]))",
+        "requests": "sum(increase(http_requests_total{tenant=\"commerce\",environment=\"staging\",cluster=\"cn-east-1\",namespace=\"trade\",service=\"checkout\",track=\"canary\"}[1m]))",
+        "control_requests": "sum(increase(http_requests_total{tenant=\"commerce\",environment=\"staging\",cluster=\"cn-east-1\",namespace=\"trade\",service=\"checkout\",track=\"stable\"}[1m]))",
+        "sample_age_seconds": "max(time() - timestamp(http_requests_total{tenant=\"commerce\",environment=\"staging\",cluster=\"cn-east-1\",namespace=\"trade\",service=\"checkout\"}))"
+      },
+      "links": {
+        "监控": "https://grafana.example.internal/d/checkout",
+        "调用链": "https://traces.example.internal/checkout",
+        "发布平台": "https://deploy.example.internal/checkout"
+      },
+      "runbook": [
+        "确认告警属于本服务，查看灰度和稳定组的错误率、请求量与 P99。",
+        "检查下游健康情况与数据库迁移，核实 rN-1 的兼容性及稳定记录。",
+        "在发布平台核对当前版本并按团队审批流程操作；此工作台不执行发布。",
+        "记录操作单号和预期版本，启动恢复观察；异常或缺证据时联系服务 Owner。"
+      ]
+    }
+  ],
+  "identities": [
+    {
+      "subject": "alertmanager:checkout",
+      "role": "receiver",
+      "service": "checkout",
+      "token_file": "/auth/receiver.token"
+    },
+    {
+      "subject": "oncall:checkout",
+      "role": "operator",
+      "service": "checkout",
+      "token_file": "/auth/operator.token"
+    }
+  ],
+  "oidc": {
+    "issuer": "https://idp.example.internal",
+    "audience": "mttr-guard-api",
+    "jwks_url": "https://idp.example.internal/.well-known/jwks.json",
+    "max_token_seconds": 900,
+    "bindings": [
+      {
+        "subject": "REPLACE_WITH_IDP_USER_SUB",
+        "service": "checkout",
+        "role": "operator"
+      }
+    ]
+  }
+}
