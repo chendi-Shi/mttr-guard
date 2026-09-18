@@ -5,6 +5,7 @@ No production systems are contacted; the evidence server explicitly uses DEMO.
 """
 import json
 import argparse
+import asyncio
 import os
 import secrets
 import socket
@@ -20,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mttr_guard.operations import backup, inspect_database, restore
+from mttr_guard.load_probe import run_probe
 from mttr_guard.pilot_demo import SCOPE, config_data, evidence_server
 from scripts.run_pilot_drill import request
 
@@ -129,6 +131,10 @@ def main():
             processes.remove(observation)
             launch("worker", "--queue", "observe")
             wait_until(lambda: incident()["state"] == "RECOVERED", processes, seconds=45)
+            load_smoke = asyncio.run(run_probe({"base_url": base, "domain": "SYNTHETIC", "service": "checkout",
+                "rate_per_second": 2, "duration_seconds": 2, "concurrency": 2,
+                "request_timeout_seconds": 5, "max_error_ratio": 0, "max_p95_seconds": 10}, tokens["operator"]))
+            assert load_smoke["numeric_gate_met"], "Functional HTTP probe failed; this is not a capacity qualification"
             saved, restored = root / "backup.db", root / "restored.db"
             backup_result = backup(database, saved, audit_key.encode())
             restored_result = restore(saved, restored, audit_key.encode())
@@ -142,6 +148,7 @@ def main():
                 "browser_check": "passed" if args.browser_check else "not_run",
                 "disclaimer": "Synthetic deployment drill; not a real MTTR result or high-availability validation"}
             report["live_integrity_quarantine"] = check_live_quarantine(database, base, tokens, iid, audit_key.encode())
+            report["capacity_probe_functional_smoke"] = load_smoke
             report["wall_clock_seconds"] = round(time.time() - started, 2)
             output = Path("artifacts/enterprise-drill.json")
             output.parent.mkdir(exist_ok=True)

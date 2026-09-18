@@ -45,3 +45,5 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Separate API/worker process and backup recovery drill
         run: python -m scripts.run_enterprise_drill
+      - name: Registered cohort evaluation CLI drill
+        run: python -m scripts.run_validation_drill

@@ -87,6 +87,8 @@ python -m mttr_guard.enterprise restore --db artifacts/backups/pilot-20260917.db
 
 ## 验收与下一阶段
 
+v0.5 增加实际证据源 preflight、运行库审计导出、固定方案的完整事件评估和限速 HTTP 探测。先阅读 [真实接入与效果验收](real-world-validation.md)，在自己的部署和数据上运行；合成演练通过不等于这些真实验证已完成。
+
 ```powershell
 python -m unittest discover -s tests -v
 python -m scripts.run_enterprise_drill
