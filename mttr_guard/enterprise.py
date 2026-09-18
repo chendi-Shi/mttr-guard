@@ -6,7 +6,6 @@ import signal
 import threading
 from pathlib import Path
 
-from .audit import verify
 from .operations import backup, inspect_database, read_key, restore
 from .pilot_store import PilotStore
 from .security import ConfigProvider
@@ -14,10 +13,7 @@ from .security import ConfigProvider
 
 def open_store(database):
     Path(database).resolve().parent.mkdir(parents=True, exist_ok=True)
-    store = PilotStore(database, audit_key=read_key())
-    with store.tx() as db:
-        verify(db, store.audit_key)
-    return store
+    return PilotStore(database, audit_key=read_key())
 
 
 def main():

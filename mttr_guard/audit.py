@@ -2,11 +2,16 @@
 import hashlib
 import hmac
 import json
+import sqlite3
 
 from .core import canonical, digest
 
 
 ZERO = "0" * 64
+
+
+class IntegrityError(RuntimeError):
+    """Stored history is untrusted; callers must not serve or sign its state."""
 
 
 def key_id(key):
@@ -39,6 +44,15 @@ def append(db, key, at, kind, scope, subject, data):
 
 
 def verify(db, key, checkpoint=None):
+    # Keep offline callers' ValueError contract; runtime guards translate this
+    # into IntegrityError, distinct from invalid user input (HTTP 400/409).
+    try:
+        return _verify(db, key, checkpoint)
+    except (TypeError, KeyError, IndexError, AttributeError, RecursionError, sqlite3.DatabaseError) as exc:
+        raise ValueError("Audit data is malformed or unavailable") from exc
+
+
+def _verify(db, key, checkpoint=None):
     stored_key = db.execute("SELECT value FROM config WHERE key='audit_key_id'").fetchone()
     if not stored_key or stored_key[0] != key_id(key):
         raise ValueError("Audit key mismatch or audit not initialized")

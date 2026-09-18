@@ -20,6 +20,8 @@ python -m mttr_guard.pilot demo
 
 安装 `requirements-enterprise.txt` 后，用 `python -m scripts.run_enterprise_drill` 可独立复现 API、worker 重启与备份恢复演练，过程不会操作真实发布平台。本地验证记录见 [验证报告](docs/validation.md)。旧的 `pilot demo` 保留作快速体验。
 
+**v0.4.1 安全修复**：修复“数据库状态被篡改后，正常接手操作将其重新签入审计链”的漏洞。事务读取或写入之前校验完整审计链及受保护状态；失败后 API 返回 503，worker 停止处理并等待人工恢复。已有完好 v0.4 审计库可以直接读取，已经损坏的库拒绝启动。这一方案每次事务全量验签，有随历史增长的性能成本，详见 [审计故障处置与容量边界](docs/audit-integrity.md)。
+
 ## 从哪里开始
 
 - [v0.2 执行可靠性](docs/execution-reliability.md)：跨系统对账、服务锁、审批撤销与进程崩溃演练。

@@ -1,14 +1,17 @@
 import importlib.util
 import json
 import os
+import sqlite3
 import time
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
 from test_pilot import PilotFixture, OPERATOR, RECEIVER, VIEWER
 from mttr_guard.pilot_config import Config
 from mttr_guard.pilot_demo import config_data
+from mttr_guard.pilot_store import PilotStore
 from mttr_guard.security import Authenticator, AuthenticationFailed, ConfigProvider, PolicyUnavailable
 
 
@@ -95,6 +98,31 @@ class ASGITests(PilotFixture):
 
     def headers(self, token=OPERATOR):
         return {"Authorization": "Bearer " + token}
+
+    def test_live_corruption_returns_503_without_serving_or_signing_data(self):
+        self.store = PilotStore(Path(self.temp.name) / "sealed-http.db", self.clock,
+                                audit_key=b"http-integrity-regression-key-1234567890")
+        iid = self.receive()
+        self.store.heartbeat("worker", "all", "RUNNING")
+        with self.client() as client:
+            self.assertEqual(client.get("/readyz").status_code, 200)
+            with closing(sqlite3.connect(self.store.path)) as db, db:
+                db.execute("UPDATE incidents SET body='forged-secret-body'")
+                damaged = list(db.iterdump())
+            for path in ("/healthz", "/readyz", "/api/session", "/api/incidents",
+                         f"/api/incidents/{iid}", "/api/metrics", "/api/operations", "/metrics"):
+                with self.subTest(path=path):
+                    result = client.get(path, headers=self.headers())
+                    self.assertEqual(result.status_code, 503, result.text)
+                    self.assertEqual(result.json()["code"], "audit_integrity_failed")
+                    self.assertNotIn("forged-secret-body", result.text)
+                    self.assertIn("X-Request-ID", result.headers)
+            result = client.post(f"/api/incidents/{iid}/ack", headers=self.headers(), json={"request_id": "ack"})
+            self.assertEqual(result.status_code, 503)
+            result = client.post("/v1/webhooks/alertmanager", headers=self.headers(RECEIVER), json=self.payload())
+            self.assertEqual(result.status_code, 503)
+            with closing(sqlite3.connect(self.store.path)) as db:
+                self.assertEqual(list(db.iterdump()), damaged)
 
     def test_auth_rbac_and_durable_intake(self):
         with self.client() as client:

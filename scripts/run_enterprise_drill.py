@@ -8,18 +8,49 @@ import argparse
 import os
 import secrets
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import urllib.error
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
 from mttr_guard.operations import backup, inspect_database, restore
 from mttr_guard.pilot_demo import SCOPE, config_data, evidence_server
 from scripts.run_pilot_drill import request
+
+
+def check_live_quarantine(database, base, tokens, iid, key):
+    """Corrupt the disposable DEMO database while API/workers are still live."""
+    with closing(sqlite3.connect(database, timeout=10)) as db, db:
+        db.execute("UPDATE incidents SET body='forged-drill-state' WHERE id=?", (iid,))
+        damaged = list(db.iterdump())
+    for path, body in (("/readyz", None), (f"/api/incidents/{iid}", None),
+                       (f"/api/incidents/{iid}/ack", {"request_id": "after-tamper"})):
+        try:
+            request(base, path, tokens["operator"], body)
+        except urllib.error.HTTPError as exc:
+            try:
+                assert exc.code == 503
+                assert json.load(exc)["code"] == "audit_integrity_failed"
+            finally:
+                exc.close()
+        else:
+            raise AssertionError("Live API accepted corrupt storage")
+    # Both idle workers poll once per second. No heartbeat, lease or audit
+    # record may advance even while their processes remain alive.
+    time.sleep(1.2)
+    with closing(sqlite3.connect(database)) as db:
+        assert list(db.iterdump()) == damaged
+    try:
+        inspect_database(database, key)
+    except ValueError:
+        return {"api_refused": True, "database_unchanged": True, "tampering_still_detected": True}
+    raise AssertionError("Normal traffic legitimized corrupted state")
 
 
 def wait_until(check, processes, seconds=20):
@@ -110,6 +141,8 @@ def main():
                 "wall_clock_seconds": round(time.time() - started, 2),
                 "browser_check": "passed" if args.browser_check else "not_run",
                 "disclaimer": "Synthetic deployment drill; not a real MTTR result or high-availability validation"}
+            report["live_integrity_quarantine"] = check_live_quarantine(database, base, tokens, iid, audit_key.encode())
+            report["wall_clock_seconds"] = round(time.time() - started, 2)
             output = Path("artifacts/enterprise-drill.json")
             output.parent.mkdir(exist_ok=True)
             output.write_text(json.dumps(report, indent=2), encoding="utf-8")

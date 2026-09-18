@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from .core import Rejected
+from .audit import IntegrityError
 from .pilot_store import QueueFull
 from .security import AuthenticationFailed, Authenticator, ConfigProvider, PolicyUnavailable
 
@@ -109,6 +110,8 @@ def create_app(store, config, authenticator=None, rate_limit=240):
             response = JSONResponse({"error": "Queue full; retry later"}, status_code=503)
         except Rejected as exc:
             response = JSONResponse({"error": str(exc)}, status_code=409)
+        except IntegrityError:
+            response = JSONResponse({"error": "Audit integrity failed; operator recovery required", "code": "audit_integrity_failed"}, status_code=503)
         except sqlite3.Error:
             response = JSONResponse({"error": "Storage unavailable"}, status_code=503)
         except (PolicyUnavailable, AuthenticationFailed) as exc:
@@ -121,6 +124,8 @@ def create_app(store, config, authenticator=None, rate_limit=240):
             try:
                 await run_in_threadpool(store.access_audit, identity.subject if identity else None,
                     asdict(service.scope) if service else None, request.method + " " + route, response.status_code, rid)
+            except IntegrityError:
+                response = JSONResponse({"error": "Audit integrity failed; operator recovery required", "code": "audit_integrity_failed"}, status_code=503)
             except Exception:
                 response = JSONResponse({"error": "Audit storage unavailable"}, status_code=503)
         response.headers.update({"X-Request-ID": rid, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",

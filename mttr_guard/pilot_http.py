@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .core import Rejected
+from .audit import IntegrityError
 from .pilot_store import QueueFull
 
 
@@ -87,6 +88,8 @@ def make_server(store, config, port=8787):
                 self.respond(503, {"error": str(exc)})
             except Rejected as exc:
                 self.respond(409, {"error": str(exc)})
+            except IntegrityError:
+                self.respond(503, {"error": "Audit integrity failed; operator recovery required", "code": "audit_integrity_failed"})
             except (ValueError, TypeError, KeyError):
                 self.respond(400, {"error": "Invalid request"})
             except sqlite3.Error:

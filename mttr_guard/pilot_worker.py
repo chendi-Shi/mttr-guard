@@ -5,6 +5,7 @@ import uuid
 from dataclasses import asdict, replace
 
 from .agents import RuleReasoner, investigate
+from .audit import IntegrityError
 from .collectors import Collector, EvidenceUnavailable, candidate_blocker
 
 
@@ -53,6 +54,8 @@ class Worker:
                 if any(f.verdict != expected[f.agent] for f in findings):
                     blocker = blocker or "分析结论不一致或模型不可用，请根据证据和 Runbook 人工判断。"
                 self.store.finish_diagnosis(job, service.scope, snapshot, [asdict(f) for f in findings], blocker)
+        except IntegrityError:
+            raise
         except Exception as exc:
             # Persist type only: provider bodies may contain credentials or customer data.
             self.store.fail_job(job, service.scope, type(exc).__name__)
@@ -65,6 +68,12 @@ class Worker:
                 with self.store.tx() as db:
                     db.execute("INSERT INTO config(key,value) VALUES ('pilot_worker_heartbeat',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(self.store.clock()),))
                 worked = self.run_once()
+            except IntegrityError:
+                # Quarantine is not transient contention. The store already
+                # emitted a critical log; wait for supervised shutdown instead
+                # of retrying/signing tainted input or flooding logs every second.
+                stop.wait()
+                return
             except Exception as exc:
                 # SQLite contention/unavailability must not silently kill the worker.
                 logging.getLogger("mttr_guard.worker").error("worker_loop_failed type=%s", type(exc).__name__)
