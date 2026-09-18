@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import sqlite3
+import sys
 
 from .core import canonical, digest
 
@@ -12,6 +13,86 @@ ZERO = "0" * 64
 
 class IntegrityError(RuntimeError):
     """Stored history is untrusted; callers must not serve or sign its state."""
+
+
+class VerificationCache:
+    """Process-local verified row memo; never a trusted database head shortcut.
+
+    max_bytes bounds estimated retained entries, not total process RSS. A verify
+    pass builds a replacement index and publishes it only after all checks pass.
+    Callers must serialize access, as PilotStore does with BEGIN IMMEDIATE.
+    """
+    def __init__(self, key, max_bytes=16 * 1024 * 1024):
+        if max_bytes < 0:
+            raise ValueError("Cache budget must be nonnegative")
+        self.key_id = key_id(key)
+        self.max_bytes = max_bytes
+        self.entries = {}
+        self.retained_bytes = 0
+        self.last_stats = {"hits": 0, "misses": 0}
+
+
+def _size(value):
+    # Memo values contain only immutable tuples/scalars, never full JSON trees.
+    return sys.getsizeof(value) + (sum(_size(v) for v in value) if isinstance(value, tuple) else 0)
+
+
+def _same_fields(left, right):
+    # Python considers 1 == 1.0 and 0.0 == -0.0, but their canonical JSON
+    # hashes differ. Schema/storage-type changes must also invalidate reuse.
+    return left == right and all(type(a) is type(b) and (type(a) is not float or a.hex() == b.hex())
+                                 for a, b in zip(left, right))
+
+
+class _Memo:
+    def __init__(self, cache, key):
+        if cache is not None and cache.key_id != key_id(key):
+            raise ValueError("Verification cache key mismatch")
+        self.cache, self.entries = cache, {}
+        self.size = self.hits = self.misses = 0
+
+    def get(self, identity, raw, compute):
+        if self.cache is None or self.cache.max_bytes == 0:
+            self.misses += 1
+            return compute()
+        previous = self.cache.entries.get(identity)
+        if previous is not None and _same_fields(previous[0], raw):
+            entry = previous
+            self.hits += 1
+        else:
+            value = compute()
+            # Account for tuple/scalar objects and conservative index overhead.
+            entry = (raw, value, _size(identity) + _size(raw) + _size(value) + 256)
+            self.misses += 1
+        if identity not in self.entries and self.size + entry[2] <= self.cache.max_bytes:
+            self.entries[identity] = entry
+            self.size += entry[2]
+        return entry[1]
+
+    def publish(self):
+        if self.cache is not None:
+            self.cache.entries = self.entries
+            self.cache.retained_bytes = self.size
+            self.cache.last_stats = {"hits": self.hits, "misses": self.misses}
+
+
+def _record(key, row):
+    current, raw, prev, signed = row
+    payload = json.loads(raw)
+    expected = signature(key, {"seq": current, "previous": prev, "payload": payload})
+    if not hmac.compare_digest(expected, signed):
+        raise ValueError("Audit chain integrity check failed")
+    kind = payload["kind"]
+    if kind == "STATE":
+        return kind, payload["data"]["incident"], payload["data"]["body_hash"]
+    if kind == "WORKFLOW":
+        return kind, payload["data"]["event_seq"], payload["data"]["event_hash"]
+    return None, None, None
+
+
+def _state(row):
+    body = json.loads(row[0])
+    return digest(body), body["id"], canonical(body["scope"]), body["state"]
 
 
 def key_id(key):
@@ -43,36 +124,44 @@ def append(db, key, at, kind, scope, subject, data):
     db.execute("UPDATE config SET value=? WHERE key='audit_head'", (canonical({"seq": seq, "signature": signed}),))
 
 
-def verify(db, key, checkpoint=None):
+def verify(db, key, checkpoint=None, *, cache=None):
     # Keep offline callers' ValueError contract; runtime guards translate this
     # into IntegrityError, distinct from invalid user input (HTTP 400/409).
     try:
-        return _verify(db, key, checkpoint)
+        memo = _Memo(cache, key)
+        result = _verify(db, key, checkpoint, memo)
+        memo.publish()
+        return result
     except (TypeError, KeyError, IndexError, AttributeError, RecursionError, sqlite3.DatabaseError) as exc:
         raise ValueError("Audit data is malformed or unavailable") from exc
 
 
-def _verify(db, key, checkpoint=None):
+def _verify(db, key, checkpoint, memo):
     stored_key = db.execute("SELECT value FROM config WHERE key='audit_key_id'").fetchone()
     if not stored_key or stored_key[0] != key_id(key):
         raise ValueError("Audit key mismatch or audit not initialized")
     previous, seq, states, event_ids = ZERO, 0, {}, set()
     checkpoint_seen = checkpoint is None or checkpoint == {"seq": 0, "signature": ZERO}
     for row in db.execute("SELECT seq,payload,previous,signature FROM audit_records ORDER BY seq"):
-        current, raw, prev, signed = tuple(row)
-        payload = json.loads(raw)
-        expected = signature(key, {"seq": current, "previous": prev, "payload": payload})
-        if current != seq + 1 or prev != previous or not hmac.compare_digest(expected, signed):
+        row = tuple(row)
+        current, raw, prev, signed = row
+        if current != seq + 1 or prev != previous:
             raise ValueError("Audit chain integrity check failed")
+        kind, subject, expected_hash = memo.get(("record", current), row, lambda: _record(key, row))
         if checkpoint and current == checkpoint["seq"]:
             checkpoint_seen = hmac.compare_digest(signed, checkpoint["signature"])
-        if payload["kind"] == "WORKFLOW":
-            event_ids.add(payload["data"]["event_seq"])
-            original = db.execute("SELECT incident,at,kind,body FROM events WHERE seq=?", (payload["data"]["event_seq"],)).fetchone()
-            if not original or digest([original[0], original[1], original[2], json.loads(original[3])]) != payload["data"]["event_hash"]:
+        if kind == "WORKFLOW":
+            event_ids.add(subject)
+            original = db.execute("SELECT incident,at,kind,body FROM events WHERE seq=?", (subject,)).fetchone()
+            if not original:
                 raise ValueError("Workflow event differs from its audit record")
-        if payload["kind"] == "STATE":
-            states[payload["data"]["incident"]] = payload["data"]["body_hash"]
+            original = tuple(original)
+            actual = memo.get(("event", subject), original,
+                lambda: digest([original[0], original[1], original[2], json.loads(original[3])]))
+            if actual != expected_hash:
+                raise ValueError("Workflow event differs from its audit record")
+        if kind == "STATE":
+            states[subject] = expected_hash
         seq, previous = current, signed
     head = {"seq": seq, "signature": previous}
     stored = json.loads(db.execute("SELECT value FROM config WHERE key='audit_head'").fetchone()[0])
@@ -82,9 +171,12 @@ def _verify(db, key, checkpoint=None):
         raise ValueError("Unaudited incident or workflow event found")
     for iid, expected in states.items():
         row = db.execute("SELECT body,scope,state FROM incidents WHERE id=?", (iid,)).fetchone()
-        if not row or digest(json.loads(row[0])) != expected:
+        if not row:
             raise ValueError("Incident state differs from its latest audit record")
-        body = json.loads(row[0])
-        if body["id"] != iid or canonical(body["scope"]) != row[1] or body["state"] != row[2]:
+        row = tuple(row)
+        actual, body_id, scope, state = memo.get(("state", iid), row, lambda: _state(row))
+        if actual != expected:
+            raise ValueError("Incident state differs from its latest audit record")
+        if body_id != iid or scope != row[1] or state != row[2]:
             raise ValueError("Incident lookup fields differ from audited state")
     return {"head": head, "keyed": bool(key), "records": seq, "verified_states": len(states)}

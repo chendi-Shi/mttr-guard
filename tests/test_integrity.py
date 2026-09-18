@@ -153,8 +153,8 @@ class RuntimeIntegrityTests(PilotFixture):
     def test_concurrent_writer_cannot_change_verified_input(self):
         iid = self.receive()
         verify = audit.verify
-        def try_competing_write(db, key):
-            result = verify(db, key)
+        def try_competing_write(db, key, **kwargs):
+            result = verify(db, key, **kwargs)
             with closing(sqlite3.connect(self.store.path, timeout=0)) as competing, competing:
                 with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
                     competing.execute("UPDATE incidents SET body='{}' WHERE id=?", (iid,))

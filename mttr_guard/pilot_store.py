@@ -18,8 +18,9 @@ class QueueFull(Rejected):
 
 
 class PilotStore(Engine):
-    def __init__(self, path, clock=None, audit_key=None):
+    def __init__(self, path, clock=None, audit_key=None, audit_cache_bytes=16 * 1024 * 1024):
         self.audit_key = audit_key
+        self._audit_cache = audit.VerificationCache(audit_key, audit_cache_bytes)
         self._audit_ready = False
         self._integrity_failed = False
         super().__init__(path, **({"clock": clock} if clock else {}))
@@ -39,16 +40,16 @@ class PilotStore(Engine):
                     db.execute(statement)
             db.execute("CREATE TABLE IF NOT EXISTS workers (id TEXT PRIMARY KEY, queue TEXT NOT NULL, seen REAL NOT NULL, state TEXT NOT NULL)")
             audit.initialize(db, self.audit_key)
-            audit.verify(db, self.audit_key)
+            audit.verify(db, self.audit_key, cache=self._audit_cache)
         self._audit_ready = True
 
     @contextmanager
     def tx(self):
         # BEGIN IMMEDIATE precedes verification: another connection cannot
         # change verified input before this transaction reads or signs it.
-        # Replay the entire history, including on reads and worker heartbeats.
-        # This intentionally trades throughput for a simple, fail-closed pilot
-        # boundary; do not cache by the mutable audit_head in the same database.
+        # Scan the entire history, including on reads and worker heartbeats.
+        # Only byte-for-byte identical, previously verified rows reuse crypto
+        # results; the mutable audit_head alone can never authorize a cache hit.
         if self._integrity_failed:
             raise audit.IntegrityError("Audit integrity failed; operator recovery required")
         with super().tx() as db:
@@ -56,7 +57,7 @@ class PilotStore(Engine):
                 raise audit.IntegrityError("Audit integrity failed; operator recovery required")
             if self._audit_ready:
                 try:
-                    audit.verify(db, self.audit_key)
+                    audit.verify(db, self.audit_key, cache=self._audit_cache)
                 except ValueError as exc:
                     self._integrity_failed = True
                     logging.getLogger(__name__).critical(

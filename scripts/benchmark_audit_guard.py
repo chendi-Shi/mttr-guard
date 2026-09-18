@@ -24,9 +24,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--records", type=int, nargs="+", default=[1000, 10000])
     parser.add_argument("--samples", type=int, default=10)
+    parser.add_argument("--cache-mib", type=int, default=16, help="Verified-row cache budget; 0 disables reuse for comparison")
     parser.add_argument("--output", type=Path, default=Path("artifacts/audit-cost.json"))
     args = parser.parse_args()
-    if args.samples < 2 or any(n < 200 for n in args.records):
+    if args.samples < 2 or any(n < 200 for n in args.records) or args.cache_mib < 0:
         parser.error("Use at least 2 samples and 200 records (100 incidents)")
     results = []
     with tempfile.TemporaryDirectory() as directory:
@@ -42,7 +43,8 @@ def main():
         data["identities"] = data["identities"][:1]
         service = Config(data).services["checkout"]
         for target in args.records:
-            store = PilotStore(root / f"history-{target}.db", audit_key=secrets.token_bytes(32))
+            store = PilotStore(root / f"history-{target}.db", audit_key=secrets.token_bytes(32),
+                               audit_cache_bytes=args.cache_mib * 1024 * 1024)
             starts = datetime.now(timezone.utc).isoformat()
             store.receive(service, {"alerts": [{"status": "firing", "labels": asdict(service.scope),
                 "fingerprint": f"synthetic-{n}", "startsAt": starts,
@@ -54,6 +56,12 @@ def main():
                 for n in range(initial, target):
                     audit.append(db, store.audit_key, store.clock(), "ACCESS", None, "synthetic",
                                  {"route": "GET /api/operations", "status": 200, "request_id": str(n)})
+            # Measure a cold full scan separately; all timed samples then start
+            # with a populated (possibly budget-limited) verified-row cache.
+            store._audit_cache = audit.VerificationCache(store.audit_key, args.cache_mib * 1024 * 1024)
+            started = time.perf_counter()
+            store.operational(service.scope)
+            cold_read_ms = (time.perf_counter() - started) * 1000
             elapsed = []
             for n in range(args.samples):
                 started = time.perf_counter()
@@ -62,11 +70,14 @@ def main():
                 elapsed.append((time.perf_counter() - started) * 1000)
             results.append({"starting_records": target, "incidents": 100, "samples": args.samples,
                 "operation": "operational + access_audit (two verified transactions)",
+                "cold_verified_read_ms": round(cold_read_ms, 3),
+                "cache_retained_bytes": store._audit_cache.retained_bytes,
+                "last_verification": store._audit_cache.last_stats,
                 "p50_ms": round(statistics.median(elapsed), 3),
                 "p95_ms": round(sorted(elapsed)[math.ceil(.95 * len(elapsed)) - 1], 3),
                 "max_ms": round(max(elapsed), 3)})
     report = {"synthetic": True, "python": platform.python_version(), "platform": platform.platform(),
-              "concurrent_clients": 1, "results": results,
+              "concurrent_clients": 1, "cache_budget_mib": args.cache_mib, "results": results,
               "limitation": "Local audit cost only; excludes HTTP, collectors, models and concurrent lock contention"}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

@@ -11,9 +11,19 @@ from .pilot_store import PilotStore
 from .security import ConfigProvider
 
 
-def open_store(database):
+def open_store(database, audit_cache_mib=16):
     Path(database).resolve().parent.mkdir(parents=True, exist_ok=True)
-    return PilotStore(database, audit_key=read_key())
+    return PilotStore(database, audit_key=read_key(), audit_cache_bytes=audit_cache_mib * 1024 * 1024)
+
+
+def cache_budget(value):
+    try:
+        size = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("Audit cache budget must be an integer MiB value")
+    if not 0 <= size <= 256:
+        raise argparse.ArgumentTypeError("Audit cache budget must be between 0 and 256 MiB")
+    return size
 
 
 def main():
@@ -23,6 +33,8 @@ def main():
         command = commands.add_parser(name)
         command.add_argument("--config", required=True)
         command.add_argument("--db", required=True)
+        command.add_argument("--audit-cache-mib", type=cache_budget, default=16,
+                             help="Per-process verified-row cache budget (default 16); 0 repeats all cryptographic checks")
         if name == "api":
             command.add_argument("--host", default="127.0.0.1")
             command.add_argument("--port", type=int, default=8787)
@@ -42,7 +54,7 @@ def main():
     if args.command in {"api", "worker"}:
         provider = ConfigProvider(args.config)
         provider.get()
-        store = open_store(args.db)
+        store = open_store(args.db, args.audit_cache_mib)
         if args.command == "api":
             import uvicorn
             from .asgi import create_app
