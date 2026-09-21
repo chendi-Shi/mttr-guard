@@ -22,3 +22,10 @@ groups:
           severity: warning
         annotations:
           summary: Recovery verification is delayed; inspect worker health and manually watch the service
+      - alert: MTTRGuardNeedsHumanAttention
+        expr: mttr_guard_needs_attention > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Incidents require human handling; inspect evidence, failed jobs and observation deadlines in the workbench

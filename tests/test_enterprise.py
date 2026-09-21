@@ -160,6 +160,28 @@ class ASGITests(PilotFixture):
             self.assertEqual(response.status_code, 200)
             self.assertIn('mttr_guard_jobs{kind="diagnose",state="READY"} 1', response.text)
 
+    def test_exhausted_job_is_visible_and_operator_can_retry_through_api(self):
+        iid = self.receive()
+        for _ in range(3):
+            self.store.claim()
+            self.clock.advance(120)
+        self.store.claim()
+        with self.client() as client:
+            metrics = client.get("/metrics", headers=self.headers(VIEWER))
+            self.assertEqual(metrics.status_code, 200)
+            self.assertIn("mttr_guard_needs_attention 1", metrics.text)
+            operations = client.get("/api/operations", headers=self.headers(VIEWER))
+            self.assertEqual(operations.json()["needs_attention"], 1)
+            payload = {"request_id": "fix-and-retry", "reason": "Collector repaired, ticket 42"}
+            route = f"/api/incidents/{iid}/refresh"
+            self.assertEqual(client.post(route, headers=self.headers(VIEWER), json=payload).status_code, 403)
+            self.assertEqual(client.post(route, headers=self.headers(), json=payload).json()["state"], "QUEUED")
+            job, _ = self.store.claim()
+            self.assertEqual(job["attempts"], 1)
+            self.assertEqual(client.post(route, headers=self.headers(), json=payload).status_code, 200)
+            self.assertIsNone(self.store.claim())
+            self.assertIn("mttr_guard_needs_attention 0", client.get("/metrics", headers=self.headers()).text)
+
     def test_rotated_token_file_takes_effect_without_restart(self):
         root = Path(self.temp.name)
         credential = root / "receiver.token"

@@ -13,6 +13,9 @@ from .core import Engine, Rejected, canonical, digest
 from . import audit
 
 
+MAX_DIAGNOSIS_ATTEMPTS = 3
+
+
 class QueueFull(Rejected):
     pass
 
@@ -96,7 +99,9 @@ class PilotStore(Engine):
             for row in jobs:
                 row["overdue_seconds"] = max(0, now - row.pop("oldest"))
             queues = {q for w in workers for q in (["diagnose", "observe"] if w["queue"] == "all" else [w["queue"]])}
-            return {"ready": queues == {"diagnose", "observe"}, "workers": len(workers), "queues": sorted(queues), "jobs": jobs}
+            attention = db.execute("SELECT COUNT(*) FROM incidents i WHERE i.state='NEEDS_ATTENTION'" + clause, args).fetchone()[0]
+            return {"ready": queues == {"diagnose", "observe"}, "workers": len(workers), "queues": sorted(queues),
+                    "jobs": jobs, "needs_attention": attention}
 
     def receive(self, service, payload, max_pending=1000):
         normalized = normalize_webhook(service.scope, payload, self.clock())
@@ -145,17 +150,36 @@ class PilotStore(Engine):
     def claim(self, lease_seconds=120, queue="all"):
         if queue not in {"all", "diagnose", "observe"}:
             raise ValueError("Invalid worker queue")
-        now = self.clock()
         with self.tx() as db:
+            now = self.clock()
             row = db.execute("SELECT * FROM pilot_jobs WHERE ((state='READY' AND due<=?) OR (state='RUNNING' AND lease_until<=?)) AND (?='all' OR kind=?) ORDER BY CASE kind WHEN 'observe' THEN 0 ELSE 1 END,due LIMIT 1", (now, now, queue, queue)).fetchone()
             if not row:
+                return None
+            incident = json.loads(db.execute("SELECT body FROM incidents WHERE id=?", (row["incident"],)).fetchone()[0])
+            # A killed process cannot call fail_job. Count every claimed lease
+            # toward the same budget, including leases abandoned by crashes.
+            if row["kind"] == "diagnose" and row["attempts"] >= MAX_DIAGNOSIS_ATTEMPTS:
+                self._stop_job(db, row, incident, "DiagnosisAttemptsExhausted",
+                               "诊断尝试次数已耗尽（包括进程中断）；请检查采集服务或 worker，再由值班人员重新收集证据。")
+                return None
+            if row["kind"] == "observe" and now >= incident["observation_deadline"]:
+                self._stop_job(db, row, incident, "ObservationDeadlineExceeded", "恢复验证超时，请继续人工处置。")
                 return None
             lease = uuid.uuid4().hex
             db.execute("UPDATE pilot_jobs SET state='RUNNING',lease=?,lease_until=?,attempts=attempts+1 WHERE incident=?", (lease, now + lease_seconds, row["incident"]))
             job = {**dict(row), "lease": lease, "attempts": row["attempts"] + 1}
-            incident = json.loads(db.execute("SELECT body FROM incidents WHERE id=?", (row["incident"],)).fetchone()[0])
             self.event(db, incident["id"], "JOB_STARTED", {"kind": job["kind"], "attempt": job["attempts"]})
             return job, incident
+
+    def _stop_job(self, db, job, inc, error_type, reason):
+        """Terminal handoff and lease revocation share the audited transaction."""
+        inc["state"], inc["attention_reason"] = "NEEDS_ATTENTION", reason
+        if job["kind"] == "observe":
+            inc["healthy_streak"] = 0
+        self._save(db, inc)
+        self.event(db, inc["id"], "JOB_STOPPED", {"kind": job["kind"], "attempt": job["attempts"], "error_type": error_type})
+        db.execute("UPDATE pilot_jobs SET state='DONE',lease=NULL,lease_until=NULL,last_error=? WHERE incident=?",
+                   (error_type, inc["id"]))
 
     def _owns(self, db, job):
         return db.execute("SELECT 1 FROM pilot_jobs WHERE incident=? AND state='RUNNING' AND lease=? AND lease_until>?",
@@ -204,11 +228,12 @@ class PilotStore(Engine):
                 expired = now >= inc["observation_deadline"]
                 delay = inc["policy"]["window_seconds"]
             else:
-                expired = job["attempts"] >= 3
+                expired = job["attempts"] >= MAX_DIAGNOSIS_ATTEMPTS
                 delay = min(60, 5 * 2 ** (job["attempts"] - 1))
             if expired:
-                inc["state"] = "NEEDS_ATTENTION"
-                inc["attention_reason"] = "证据采集失败或恢复观察超时；请通过服务链接与 Runbook 继续人工处置。"
+                self._stop_job(db, job, inc, error_type,
+                               "证据采集失败或恢复观察超时；请通过服务链接与 Runbook 继续人工处置。")
+                return
             self._save(db, inc)
             db.execute("UPDATE pilot_jobs SET state=?,due=?,lease=NULL,lease_until=NULL,last_error=? WHERE incident=?",
                        ("DONE" if expired else "READY", now + delay, error_type, inc["id"]))
@@ -305,6 +330,9 @@ class PilotStore(Engine):
             if inc["state"] != "OBSERVING":
                 return False
             now, p = self.clock(), inc["policy"]
+            if now >= inc["observation_deadline"]:
+                self._stop_job(db, job, inc, "ObservationDeadlineExceeded", "恢复验证超时，请继续人工处置。")
+                return True
             stamp, m, d = snapshot["collected_at"], snapshot["metrics"], snapshot["deployment"]
             previous = inc["observations"][-1]["at"] if inc["observations"] else inc["observation_started_at"]
             if stamp - previous < p["window_seconds"] or stamp > now or now - stamp > p["max_sample_age_seconds"]:
@@ -325,9 +353,7 @@ class PilotStore(Engine):
                            "revision": d["revision"], "evidence_digest": digest(snapshot["evidence"])}
             inc["observations"] = [*inc["observations"], observation][-20:]
             self.event(db, inc["id"], "RECOVERY_WINDOW", observation)
-            if now >= inc["observation_deadline"]:
-                inc["state"], inc["attention_reason"] = "NEEDS_ATTENTION", "恢复验证超时，请继续人工处置。"
-            elif inc["healthy_streak"] >= p["consecutive_windows"]:
+            if inc["healthy_streak"] >= p["consecutive_windows"]:
                 inc["state"], inc["recovered_at"] = "RECOVERED", stamp
                 inc["recovery_seconds"] = stamp - inc["detected_at"]
                 inc["timeline"]["verified_recovery"] = stamp

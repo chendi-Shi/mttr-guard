@@ -250,6 +250,7 @@ def create_app(store, config, authenticator=None, rate_limit=240):
         result = await run_in_threadpool(store.operational, service.scope)
         lines = ["# TYPE mttr_guard_workers gauge", f"mttr_guard_workers {result['workers']}",
                  "# TYPE mttr_guard_ready gauge", f"mttr_guard_ready {int(result['ready'])}",
+                 "# TYPE mttr_guard_needs_attention gauge", f"mttr_guard_needs_attention {result['needs_attention']}",
                  "# TYPE mttr_guard_jobs gauge", "# TYPE mttr_guard_oldest_due_seconds gauge"]
         for row in result["jobs"]:
             labels = f'kind="{row["kind"]}",state="{row["state"]}"'
