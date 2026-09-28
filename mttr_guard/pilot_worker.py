@@ -17,7 +17,7 @@ class Worker:
 
     def run_once(self):
         config = self.config.get() if hasattr(self.config, "get") else self.config
-        claimed = self.store.claim(queue=self.queue)
+        claimed = self.store.claim(queue=self.queue, limits_by_scope={s.scope.key: s.queue_limits["max_running_per_queue"] for s in config.services.values()})
         if not claimed:
             return False
         job, inc = claimed

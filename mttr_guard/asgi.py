@@ -107,7 +107,8 @@ def create_app(store, config, authenticator=None, rate_limit=240):
             else:
                 response = await call_next(request)
         except QueueFull:
-            response = JSONResponse({"error": "Queue full; retry later"}, status_code=503)
+            response = JSONResponse({"error": "Queue full; retry later", "code": "queue_full"}, status_code=503,
+                                    headers={"Retry-After": "5"})
         except Rejected as exc:
             response = JSONResponse({"error": str(exc)}, status_code=409)
         except IntegrityError:
@@ -242,7 +243,8 @@ def create_app(store, config, authenticator=None, rate_limit=240):
     @app.get("/api/operations")
     async def operations(request: Request):
         _, service = await authorize(request, {"viewer", "operator"})
-        return await run_in_threadpool(store.operational, service.scope)
+        result = await run_in_threadpool(store.operational, service.scope)
+        return {**result, "queue_limits": service.queue_limits}
 
     @app.get("/metrics")
     async def prometheus(request: Request):
@@ -251,10 +253,16 @@ def create_app(store, config, authenticator=None, rate_limit=240):
         lines = ["# TYPE mttr_guard_workers gauge", f"mttr_guard_workers {result['workers']}",
                  "# TYPE mttr_guard_ready gauge", f"mttr_guard_ready {int(result['ready'])}",
                  "# TYPE mttr_guard_needs_attention gauge", f"mttr_guard_needs_attention {result['needs_attention']}",
-                 "# TYPE mttr_guard_jobs gauge", "# TYPE mttr_guard_oldest_due_seconds gauge"]
+                 "# TYPE mttr_guard_jobs gauge", "# TYPE mttr_guard_oldest_due_seconds gauge",
+                 "# TYPE mttr_guard_active_leases gauge", "# TYPE mttr_guard_queue_pending_limit gauge",
+                 "# TYPE mttr_guard_queue_running_limit gauge"]
+        for kind in ("diagnose", "observe"):
+            lines.extend([f'mttr_guard_queue_pending_limit{{kind="{kind}"}} {service.queue_limits["max_pending_per_queue"]}',
+                          f'mttr_guard_queue_running_limit{{kind="{kind}"}} {service.queue_limits["max_running_per_queue"]}'])
         for row in result["jobs"]:
             labels = f'kind="{row["kind"]}",state="{row["state"]}"'
             lines.extend([f'mttr_guard_jobs{{{labels}}} {row["count"]}', f'mttr_guard_oldest_due_seconds{{{labels}}} {row["overdue_seconds"]:.3f}'])
+            lines.append(f'mttr_guard_active_leases{{{labels}}} {row["active_leases"]}')
         return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
     return app

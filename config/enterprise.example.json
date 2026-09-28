@@ -16,6 +16,10 @@
       "prometheus_token_env": "MTTR_PROMETHEUS_TOKEN",
       "evidence_token_env": "MTTR_EVIDENCE_TOKEN",
       "baseline_qps": 1000,
+      "queue_limits": {
+        "max_pending_per_queue": 100,
+        "max_running_per_queue": 2
+      },
       "policy": {
         "window_seconds": 60,
         "consecutive_windows": 3,

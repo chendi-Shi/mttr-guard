@@ -14,6 +14,7 @@ from .alertmanager import normalize_webhook
 from .core import Engine, Rejected, canonical, digest
 from . import audit
 from .checkpoints import read as read_checkpoint
+from .pilot_config import DEFAULT_QUEUE_LIMITS
 
 
 MAX_DIAGNOSIS_ATTEMPTS = 3
@@ -46,6 +47,9 @@ class PilotStore(Engine):
                 CREATE TABLE IF NOT EXISTS pilot_requests (
                     incident TEXT NOT NULL, request_id TEXT NOT NULL, digest TEXT NOT NULL,
                     PRIMARY KEY(incident, request_id));
+                CREATE TABLE IF NOT EXISTS pilot_dispatch (
+                    scope TEXT NOT NULL, kind TEXT NOT NULL, turn INTEGER NOT NULL,
+                    PRIMARY KEY(scope, kind));
             """
             for statement in schema.split(";"):
                 if statement.strip():
@@ -122,7 +126,7 @@ class PilotStore(Engine):
         with self.tx() as db:
             workers = [dict(row) for row in db.execute("SELECT * FROM workers WHERE seen>=? AND state<>'STOPPED'", (now - 150,))]
             clause, args = (" AND i.scope=?", (scope.key,)) if scope else ("", ())
-            jobs = [dict(row) for row in db.execute("SELECT j.kind,j.state,COUNT(*) AS count,MIN(j.due) AS oldest FROM pilot_jobs j JOIN incidents i ON i.id=j.incident WHERE j.state<>'DONE'" + clause + " GROUP BY j.kind,j.state", args)]
+            jobs = [dict(row) for row in db.execute("SELECT j.kind,j.state,COUNT(*) AS count,MIN(j.due) AS oldest,SUM(CASE WHEN j.state='RUNNING' AND j.lease_until>? THEN 1 ELSE 0 END) AS active_leases FROM pilot_jobs j JOIN incidents i ON i.id=j.incident WHERE j.state<>'DONE'" + clause + " GROUP BY j.kind,j.state", (now, *args))]
             for row in jobs:
                 row["overdue_seconds"] = max(0, now - row.pop("oldest"))
             queues = {q for w in workers for q in (["diagnose", "observe"] if w["queue"] == "all" else [w["queue"]])}
@@ -136,6 +140,7 @@ class PilotStore(Engine):
         result = []
         with self.tx() as db:
             pending = db.execute("SELECT COUNT(*) FROM pilot_jobs WHERE state<>'DONE'").fetchone()[0]
+            service_pending = self._pending(db, service.scope, "diagnose")
             for (fingerprint, started), alert in zip(normalized, firing):
                 key = digest([service.scope.key, fingerprint, started])
                 row = db.execute("SELECT id FROM incidents WHERE dedup=?", (key,)).fetchone()
@@ -144,7 +149,10 @@ class PilotStore(Engine):
                     continue
                 if pending >= max_pending:
                     raise QueueFull("Incident queue is full; sender should retry")
+                if service_pending >= service.queue_limits["max_pending_per_queue"]:
+                    raise QueueFull("Service diagnosis queue is full; sender should retry")
                 pending += 1
+                service_pending += 1
                 iid, now = uuid.uuid4().hex, self.clock()
                 annotations = alert.get("annotations", {})
                 if not isinstance(annotations, dict):
@@ -174,14 +182,42 @@ class PilotStore(Engine):
                 (scope.key, before or 9_223_372_036_854_775_807, limit)).fetchall()
             return [{**json.loads(row["body"]), "cursor": row["rowid"]} for row in rows]
 
-    def claim(self, lease_seconds=120, queue="all"):
+    @staticmethod
+    def _pending(db, scope, kind):
+        return db.execute("SELECT COUNT(*) FROM pilot_jobs j JOIN incidents i ON i.id=j.incident WHERE i.scope=? AND j.kind=? AND j.state<>'DONE'",
+                          (scope.key, kind)).fetchone()[0]
+
+    def _require_capacity(self, db, service, kind, iid):
+        # Human refresh/observation must not bypass the same admission limits.
+        # Existing active work changing queues replaces its slot atomically.
+        old = db.execute("SELECT kind,state FROM pilot_jobs WHERE incident=?", (iid,)).fetchone()
+        active = old is not None and old["state"] != "DONE"
+        total = db.execute("SELECT COUNT(*) FROM pilot_jobs WHERE state<>'DONE'").fetchone()[0] - int(active)
+        pending = self._pending(db, service.scope, kind) - int(active and old["kind"] == kind)
+        if total >= 1000 or pending >= service.queue_limits["max_pending_per_queue"]:
+            raise QueueFull("Queue capacity exhausted; retry when capacity is available")
+
+    def claim(self, lease_seconds=120, queue="all", limits_by_scope=None):
         if queue not in {"all", "diagnose", "observe"}:
             raise ValueError("Invalid worker queue")
+        limits_by_scope = {} if limits_by_scope is None else limits_by_scope
+        if any(type(limit) is not int or not 1 <= limit <= 32 for limit in limits_by_scope.values()):
+            raise ValueError("Invalid per-service running limit")
         with self.tx() as db:
             now = self.clock()
-            row = db.execute("SELECT * FROM pilot_jobs WHERE ((state='READY' AND due<=?) OR (state='RUNNING' AND lease_until<=?)) AND (?='all' OR kind=?) ORDER BY CASE kind WHEN 'observe' THEN 0 ELSE 1 END,due LIMIT 1", (now, now, queue, queue)).fetchone()
+            active = {(r["scope"], r["kind"]): r["count"] for r in db.execute(
+                "SELECT i.scope,j.kind,COUNT(*) AS count FROM pilot_jobs j JOIN incidents i ON i.id=j.incident WHERE j.state='RUNNING' AND j.lease_until>? GROUP BY i.scope,j.kind", (now,))}
+            candidates = db.execute("SELECT j.*,i.scope AS dispatch_scope FROM pilot_jobs j JOIN incidents i ON i.id=j.incident LEFT JOIN pilot_dispatch d ON d.scope=i.scope AND d.kind=j.kind WHERE ((j.state='READY' AND j.due<=?) OR (j.state='RUNNING' AND j.lease_until<=?)) AND (?='all' OR j.kind=?) ORDER BY CASE j.kind WHEN 'observe' THEN 0 ELSE 1 END,COALESCE(d.turn,0),j.due,i.rowid", (now, now, queue, queue))
+            row = next((r for r in candidates if active.get((r["dispatch_scope"], r["kind"]), 0)
+                        < limits_by_scope.get(r["dispatch_scope"], DEFAULT_QUEUE_LIMITS["max_running_per_queue"])), None)
+            candidates.close()
             if not row:
                 return None
+            # The turn and lease share BEGIN IMMEDIATE across worker processes;
+            # wall-clock jumps and restarts cannot reset service priority.
+            turn = db.execute("SELECT COALESCE(MAX(turn),0)+1 FROM pilot_dispatch").fetchone()[0]
+            db.execute("INSERT INTO pilot_dispatch VALUES (?,?,?) ON CONFLICT(scope,kind) DO UPDATE SET turn=excluded.turn",
+                       (row["dispatch_scope"], row["kind"], turn))
             incident = json.loads(db.execute("SELECT body FROM incidents WHERE id=?", (row["incident"],)).fetchone()[0])
             # A killed process cannot call fail_job. Count every claimed lease
             # toward the same budget, including leases abandoned by crashes.
@@ -305,6 +341,7 @@ class PilotStore(Engine):
                 if inc["state"] not in {"RECOMMENDED", "NEEDS_ATTENTION"}:
                     raise Rejected("Only inactive recommendations can be refreshed")
                 self._reason(body)
+                self._require_capacity(db, service, "diagnose", iid)
                 inc["state"], inc["recommendation"], inc["review"] = "QUEUED", None, None
                 inc.pop("attention_reason", None)
                 db.execute("INSERT INTO pilot_jobs(incident,kind,state,due) VALUES (?,'diagnose','READY',?) ON CONFLICT(incident) DO UPDATE SET kind='diagnose',state='READY',due=excluded.due,lease=NULL,lease_until=NULL,attempts=0,last_error=NULL", (iid, now))
@@ -315,6 +352,7 @@ class PilotStore(Engine):
                 target = body.get("target_revision")
                 if not isinstance(target, str) or not 1 <= len(target) <= 200:
                     raise Rejected("Report the version actually expected after the manual action")
+                self._require_capacity(db, service, "observe", iid)
                 inc["manual_action"] = {"subject": identity.subject, "reported_at": now, "reason": reason, "target_revision": target}
                 inc["timeline"].setdefault("mitigation_reported", now)
                 inc["observation_started_at"] = now

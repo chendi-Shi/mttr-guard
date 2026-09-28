@@ -206,6 +206,35 @@ class ASGITests(PilotFixture):
             self.assertEqual(response.status_code, 503)
             self.assertEqual(inspect_database(self.store.path, KEY), before)
 
+    def test_queue_backpressure_keeps_duplicates_and_exposes_scoped_limits(self):
+        from dataclasses import replace, asdict
+        self.service = replace(self.service, queue_limits={"max_pending_per_queue": 1, "max_running_per_queue": 1})
+        self.config.services["checkout"] = self.service
+        other = replace(self.service, name="payments", scope=replace(self.service.scope, service="payments"),
+                        queue_limits={"max_pending_per_queue": 10, "max_running_per_queue": 2})
+        for n in range(3):
+            payload = self.payload("other" + str(n))
+            payload["alerts"][0]["labels"] = asdict(other.scope)
+            self.store.receive(other, payload)
+        with self.client() as client:
+            path = "/v1/webhooks/alertmanager"
+            first = client.post(path, headers=self.headers(RECEIVER), json=self.payload())
+            self.assertEqual(first.status_code, 202)
+            duplicate = client.post(path, headers=self.headers(RECEIVER), json=self.payload())
+            self.assertEqual(duplicate.json(), first.json())
+            rejected = client.post(path, headers=self.headers(RECEIVER), json=self.payload("overflow"))
+            self.assertEqual(rejected.status_code, 503)
+            self.assertEqual(rejected.headers["Retry-After"], "5")
+            self.assertEqual(rejected.json()["code"], "queue_full")
+            operations = client.get("/api/operations", headers=self.headers(VIEWER)).json()
+            self.assertEqual(operations["queue_limits"], self.service.queue_limits)
+            self.assertEqual(sum(j["count"] for j in operations["jobs"]), 1)
+            metrics = client.get("/metrics", headers=self.headers(VIEWER)).text
+            self.assertIn('mttr_guard_queue_pending_limit{kind="diagnose"} 1', metrics)
+            self.assertIn('mttr_guard_queue_running_limit{kind="observe"} 1', metrics)
+            self.assertIn('mttr_guard_active_leases{kind="diagnose",state="READY"} 0', metrics)
+            self.assertNotIn("payments", metrics)
+
     def test_rotated_token_file_takes_effect_without_restart(self):
         root = Path(self.temp.name)
         credential = root / "receiver.token"

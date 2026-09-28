@@ -5,7 +5,7 @@ import hashlib
 import json
 import math
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -13,6 +13,7 @@ from .core import Scope, digest
 
 
 METRICS = ("error_rate", "control_error_rate", "p99_ms", "qps", "requests", "control_requests", "sample_age_seconds")
+DEFAULT_QUEUE_LIMITS = {"max_pending_per_queue": 100, "max_running_per_queue": 2}
 DEFAULT_POLICY = {"max_error_rate": .01, "max_p99_ms": 500, "min_qps_ratio": .8,
                   "min_requests": 100, "window_seconds": 60, "consecutive_windows": 3,
                   "max_sample_age_seconds": 30, "observation_timeout_seconds": 1800}
@@ -29,6 +30,18 @@ def endpoint(value):
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
         raise ValueError("Endpoints must be configured HTTP(S) URLs without inline credentials")
     return value.rstrip("/")
+
+
+def queue_limits(value):
+    if not isinstance(value, dict) or set(value) - set(DEFAULT_QUEUE_LIMITS):
+        raise ValueError("Invalid service queue limits")
+    result = {**DEFAULT_QUEUE_LIMITS, **value}
+    for key, high in (("max_pending_per_queue", 1000), ("max_running_per_queue", 32)):
+        if type(result[key]) is not int or not 1 <= result[key] <= high:
+            raise ValueError("Invalid service queue limit: " + key)
+    if result["max_running_per_queue"] > result["max_pending_per_queue"]:
+        raise ValueError("Running limit must not exceed pending limit")
+    return result
 
 
 @dataclass(frozen=True)
@@ -54,10 +67,11 @@ class Service:
     prometheus_token_env: str | None = None
     evidence_token_env: str | None = None
     mode: str = "READ_ONLY"
+    queue_limits: dict = field(default_factory=lambda: dict(DEFAULT_QUEUE_LIMITS))
 
     @property
     def collection_hash(self):
-        return digest({key: value for key, value in asdict(self).items() if key not in {"owner", "links", "runbook", "prometheus_token_env", "evidence_token_env"}})
+        return digest({key: value for key, value in asdict(self).items() if key not in {"owner", "links", "runbook", "prometheus_token_env", "evidence_token_env", "queue_limits"}})
 
 
 class Config:
@@ -102,7 +116,7 @@ class Config:
                     raise ValueError("Configured connector credential environment variable is missing")
             self.services[name] = Service(name, scope, owner, endpoint(item["prometheus_url"]),
                 endpoint(item["evidence_url"]), queries, number(item["baseline_qps"], "baseline_qps", .000001),
-                policy, links, runbook, prometheus_token_env, evidence_token_env, mode)
+                policy, links, runbook, prometheus_token_env, evidence_token_env, mode, queue_limits(item.get("queue_limits", {})))
         if not self.services:
             raise ValueError("Configure at least one service")
         self.identities = []
