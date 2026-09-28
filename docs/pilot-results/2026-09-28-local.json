@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "domain": "LOCAL_LAB",
+  "result": "INCOMPLETE_OPERATOR_TIMEOUT",
+  "base_commit": "721554df349039a1a82f00a84e6c0d1c49908b60",
+  "runtime": {
+    "os": "Windows",
+    "python": "3.14.7",
+    "prometheus": "3.5.0",
+    "alertmanager": "0.28.1"
+  },
+  "reasoner": "Four-role deterministic baseline; no LLM",
+  "fault_injections": 1,
+  "completed_recoveries": 0,
+  "integration_attempts": [
+    {
+      "status": "FAILED",
+      "failure_phase": "WARMING_UP",
+      "error_type": "ValueError",
+      "elapsed_seconds": 53.0961127281189,
+      "http_outcomes": {
+        "stable/200": 750,
+        "canary/200": 39
+      }
+    },
+    {
+      "status": "FAILED",
+      "failure_phase": "WARMING_UP",
+      "error_type": "ValueError",
+      "elapsed_seconds": 53.499197244644165,
+      "http_outcomes": {
+        "stable/200": 761,
+        "canary/200": 40
+      }
+    },
+    {
+      "status": "FAILED",
+      "failure_phase": "WARMING_UP",
+      "error_type": "ValueError",
+      "elapsed_seconds": 49.5117609500885,
+      "http_outcomes": {
+        "stable/200": 891,
+        "canary/200": 46
+      }
+    },
+    {
+      "status": "FAILED",
+      "failure_phase": "AWAITING_OPERATOR",
+      "error_type": "TimeoutError",
+      "elapsed_seconds": 301.80198550224304,
+      "http_outcomes": {
+        "stable/200": 6562,
+        "canary/200": 64,
+        "canary/500": 281
+      }
+    }
+  ],
+  "incident_id": "80c085c2f20d45ed908810d91522096e",
+  "state_at_stop": "RECOMMENDED",
+  "detected_at": 1790590919.922,
+  "timeline": {
+    "analysis_ready": 1790590923.1751337,
+    "evidence_ready": 1790590922.711735,
+    "received": 1790590921.0448532,
+    "recommendation_ready": 1790590923.1751337
+  },
+  "phases": [
+    {
+      "phase": "CONFIGURING",
+      "at": 1790590865.0370984
+    },
+    {
+      "phase": "WARMING_UP",
+      "at": 1790590870.7418845
+    },
+    {
+      "phase": "PREFLIGHT_PASSED",
+      "at": 1790590913.3906245
+    },
+    {
+      "phase": "FAULT_INJECTED",
+      "at": 1790590913.5220435,
+      "revision": "r42",
+      "changed_at": 1790590913.5147297
+    },
+    {
+      "phase": "AWAITING_OPERATOR",
+      "at": 1790590924.8555484,
+      "incident_id": "80c085c2f20d45ed908810d91522096e",
+      "plan_hash": "ba29b697caacb7b92ad482a74a4e4bd19dbc4641319cd73cc73d06473474bde6",
+      "target_revision": "r41",
+      "metrics": {
+        "control_error_rate": 0.0,
+        "control_requests": 893.6671786262813,
+        "error_rate": 0.290077961653523,
+        "p99_ms": 444.9999999999996,
+        "qps": 1.5596944910764248,
+        "requests": 46.790834732292744,
+        "sample_age_seconds": 1.726175308227539
+      },
+      "expires_at": 1790591223.1751337
+    },
+    {
+      "phase": "FAILED",
+      "at": 1790591166.5547957,
+      "error_type": "TimeoutError"
+    }
+  ],
+  "seconds": {
+    "alert_to_receipt": 1.1228532791137695,
+    "receipt_to_evidence": 1.666881799697876,
+    "receipt_to_recommendation": 2.1302804946899414,
+    "alert_to_recommendation": 3.253133773803711
+  },
+  "preflight": {
+    "schema_version": 1,
+    "status": "source_contract_passed",
+    "scope": {
+      "tenant": "local-lab",
+      "environment": "local-pilot",
+      "cluster": "loopback",
+      "namespace": "experiment",
+      "service": "checkout"
+    },
+    "mode": "READ_ONLY",
+    "checked_at": "2026-09-28T10:21:52.975505+00:00",
+    "collection_hash": "7cce747fe25fa2c343389b2e322265aef29aa32a3c6762d03f771ffd7ab6462c",
+    "snapshot_sha256": "5dc36e43481b59790458f8e7f86ed0a4cce8db3b2aae0a75e543f912ca6ef65b",
+    "sample_age_seconds": 2.065417528152466,
+    "sufficient_samples": true,
+    "metrics": {
+      "error_rate": 0.0,
+      "control_error_rate": 0.0,
+      "p99_ms": 450.00000000000017,
+      "qps": 1.4285714285714284,
+      "requests": 42.857142857142854,
+      "control_requests": 826.0714285714286,
+      "sample_age_seconds": 2.065417528152466
+    },
+    "recovery_policy": {
+      "max_error_rate": 0.01,
+      "max_p99_ms": 500,
+      "min_qps_ratio": 0.5,
+      "min_requests": 20,
+      "window_seconds": 30,
+      "consecutive_windows": 3,
+      "max_sample_age_seconds": 5,
+      "observation_timeout_seconds": 240
+    },
+    "trace_sample_count": 43,
+    "elapsed_seconds": 0.7478400999999906,
+    "claims": {
+      "production_capacity": "not_assessed",
+      "mttr_reduction": "not_assessed",
+      "source_authenticity": "Configured source declaration; requires operator verification"
+    },
+    "limitation": "One point-in-time read of configured evidence; no fault injection, IAM integration or deployment writes"
+  },
+  "diagnosis_metrics": {
+    "control_error_rate": 0.0,
+    "control_requests": 893.6671786262813,
+    "error_rate": 0.290077961653523,
+    "p99_ms": 444.9999999999996,
+    "qps": 1.5596944910764248,
+    "requests": 46.790834732292744,
+    "sample_age_seconds": 1.726175308227539
+  },
+  "diagnosis_traces": {
+    "downstream_healthy": true,
+    "failing_span": "checkout.validate",
+    "sample_count": 46
+  },
+  "diagnosis_deployment": {
+    "changed_at": 1790590913.5147297,
+    "known_good": true,
+    "previous_revision": "r41",
+    "revision": "r42",
+    "rollout_complete": true,
+    "schema_migration": false,
+    "traffic_percent": 5
+  },
+  "http_outcomes": {
+    "stable/200": 6562,
+    "canary/200": 64,
+    "canary/500": 281
+  },
+  "releases": [
+    {
+      "at": 1790590869.402542,
+      "actor": "bootstrap",
+      "before": "r40",
+      "after": "r41",
+      "reason": "Initial local test service",
+      "scope": {
+        "tenant": "local-lab",
+        "environment": "local-pilot",
+        "cluster": "loopback",
+        "namespace": "experiment",
+        "service": "checkout"
+      },
+      "environment_type": "LOCAL_LAB"
+    },
+    {
+      "at": 1790590913.5147297,
+      "actor": "fault-injection-harness",
+      "before": "r41",
+      "after": "r42",
+      "reason": "Registered local discount parser fault",
+      "scope": {
+        "tenant": "local-lab",
+        "environment": "local-pilot",
+        "cluster": "loopback",
+        "namespace": "experiment",
+        "service": "checkout"
+      },
+      "environment_type": "LOCAL_LAB"
+    }
+  ],
+  "spans": {
+    "total": 20721,
+    "failed_validate": 281,
+    "failed_validate_with_matching_parent": 281
+  },
+  "audit": {
+    "keyed": true,
+    "records": 14,
+    "verified_states": 1,
+    "head": {
+      "seq": 14,
+      "signature": "5b3adfbb5daf0a700eecbd5696a8852a4ec6639da9e2665ef932abfe40822e62"
+    },
+    "incidents": 1,
+    "pending_jobs": 0
+  },
+  "evidence_sha256": {
+    "plan.json": "2d2b0b0bc64d330dd4081bbba090ae49e45439f6bc790cd5415497c6e8d8c6b2",
+    "spans.jsonl": "61b170910dcd06f56da0b630423c1bd3ca563766773989dfc60dcf56c4c7a0f1",
+    "releases.jsonl": "0dcf056860739fea04fb5eaa03c4defc9e37b9ad858a6efdbee5fb68b7095d61",
+    "preflight.json": "b68afdd8eff07d5bfc0f8d6546f0be7b575eb5f85e202eab79dc7a1796ff90db",
+    "baseline-prometheus.json": "95621a0d3cf20de34c252060505e58cb2d03f17f9f4b1d0d62c29c60921b5e95",
+    "fault-prometheus.json": "819883599aa9fc8b57703a602dc5d244bd9344da1f9a35f5b16328c7488746f9",
+    "diagnosis.json": "6db1480000f7d2fda3e38939165af65d314c00dcd41fd27aee872df06e4eb1a4"
+  },
+  "human_decision": null,
+  "human_effort_seconds": null,
+  "recovery_seconds": null,
+  "limits": [
+    "Synthetic workload on localhost",
+    "No human decision was received before the 240-second wait deadline",
+    "No rollback or recovery verification was performed",
+    "No production readiness, LLM quality or causal MTTR claim"
+  ]
+}

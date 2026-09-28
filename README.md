@@ -38,6 +38,9 @@ python -m mttr_guard.pilot demo
 
 ## 从哪里开始
 
+- [本机真实 HTTP 与监控试点](docs/local-pilot.md)：独立运行 Prometheus、Alertmanager 和 OpenTelemetry；实际注入版本故障，人工决定回退，再验证三个健康窗口。属于 LOCAL_LAB，不表示生产效果。
+- [2026-09-28 实测报告](docs/pilot-results/2026-09-28-local.md)：真实告警到建议 3.253 秒，人工等待超时，尚未完成恢复闭环；包含接入失败记录和修复。
+
 - [v0.2 执行可靠性](docs/execution-reliability.md)：跨系统对账、服务锁、审批撤销与进程崩溃演练。
 - [v0.3 只读试点](docs/read-only-pilot.md)：运行工作台、接真实证据、人工接管、持久化任务和效果测量。
 - [v0.4 持续运行](docs/production-pilot.md)：分离进程、身份校验、审计、备份恢复、部署及剩余边界。

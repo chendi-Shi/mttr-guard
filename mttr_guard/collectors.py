@@ -8,6 +8,7 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import asdict
+from decimal import Decimal, ROUND_FLOOR
 
 from .core import digest
 from .pilot_config import METRICS, number
@@ -45,9 +46,12 @@ class Collector:
         service = self.service
         prometheus_token = os.environ.get(service.prometheus_token_env) if service.prometheus_token_env else None
         evidence_token = os.environ.get(service.evidence_token_env) if service.evidence_token_env else None
+        # Prometheus rounds numeric API times to milliseconds. Round down here
+        # so legitimate responses never appear newer than the collection time.
+        query_time = str(Decimal(str(now)).quantize(Decimal("0.001"), rounding=ROUND_FLOOR))
 
         def metric(name):
-            query = urllib.parse.urlencode({"query": service.queries[name], "time": now, "timeout": "4s"})
+            query = urllib.parse.urlencode({"query": service.queries[name], "time": query_time, "timeout": "4s"})
             body = self.transport(service.prometheus_url + "/api/v1/query?" + query, prometheus_token)
             if body.get("status") != "success" or body.get("warnings") or body.get("data", {}).get("resultType") != "vector":
                 raise EvidenceUnavailable("Prometheus returned an unsuccessful or partial query")

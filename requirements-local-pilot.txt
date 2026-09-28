@@ -1,0 +1,7 @@
+-r requirements-enterprise.txt
+prometheus-client==0.22.1
+opentelemetry-api==1.36.0
+opentelemetry-sdk==1.36.0
+opentelemetry-semantic-conventions==0.57b0
+importlib-metadata==8.7.0
+zipp==3.23.0

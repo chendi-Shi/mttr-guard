@@ -92,6 +92,29 @@ class PilotFixture(unittest.TestCase):
         return iid
 
 class PilotTests(PilotFixture):
+    def test_prometheus_millisecond_rounding_does_not_reject_valid_data(self):
+        def transport(url, token=None):
+            result = self.transport(url, token)
+            if urlsplit(url).path != "/evidence":
+                value = result["data"]["result"][0]["value"]
+                # Actual Prometheus API rounds its numeric time argument.
+                value[0] = int(value[0] * 1000 + .5) / 1000
+            return result
+        for fraction in (.0001, .0008, .1238, .9999):
+            with self.subTest(fraction=fraction):
+                now = self.clock() + fraction
+                snapshot = Collector(self.service, transport).collect(now)
+                self.assertEqual(snapshot["collected_at"], now)
+
+    def test_future_prometheus_data_still_rejected_after_time_alignment(self):
+        def transport(url, token=None):
+            result = self.transport(url, token)
+            if urlsplit(url).path != "/evidence":
+                result["data"]["result"][0]["value"][0] = self.clock() + .01
+            return result
+        with self.assertRaises(EvidenceUnavailable):
+            Collector(self.service, transport).collect(self.clock() + .0008)
+
     def test_batch_receipt_and_job_commit_are_atomic(self):
         payload = self.payload()
         payload["alerts"].append({**payload["alerts"][0], "fingerprint": "second", "annotations": "invalid"})
