@@ -4,13 +4,16 @@ from __future__ import annotations
 import json
 import logging
 import math
+import threading
 import uuid
 from contextlib import contextmanager
 from dataclasses import asdict
+from pathlib import Path
 
 from .alertmanager import normalize_webhook
 from .core import Engine, Rejected, canonical, digest
 from . import audit
+from .checkpoints import read as read_checkpoint
 
 
 MAX_DIAGNOSIS_ATTEMPTS = 3
@@ -21,8 +24,14 @@ class QueueFull(Rejected):
 
 
 class PilotStore(Engine):
-    def __init__(self, path, clock=None, audit_key=None, audit_cache_bytes=16 * 1024 * 1024):
+    def __init__(self, path, clock=None, audit_key=None, audit_cache_bytes=16 * 1024 * 1024, audit_checkpoint=None):
         self.audit_key = audit_key
+        if audit_checkpoint is not None and not audit_key:
+            raise ValueError("External checkpoints require keyed audit")
+        self._checkpoint_path = Path(audit_checkpoint).resolve() if audit_checkpoint is not None else None
+        self._checkpoint_floor = None
+        self._audit_floor = None
+        self._audit_lock = threading.RLock()
         self._audit_cache = audit.VerificationCache(audit_key, audit_cache_bytes)
         self._audit_ready = False
         self._integrity_failed = False
@@ -43,8 +52,20 @@ class PilotStore(Engine):
                     db.execute(statement)
             db.execute("CREATE TABLE IF NOT EXISTS workers (id TEXT PRIMARY KEY, queue TEXT NOT NULL, seen REAL NOT NULL, state TEXT NOT NULL)")
             audit.initialize(db, self.audit_key)
-            audit.verify(db, self.audit_key, cache=self._audit_cache)
+            self._verify_history(db)
         self._audit_ready = True
+
+    def _verify_history(self, db):
+        checkpoint = read_checkpoint(self._checkpoint_path) if self._checkpoint_path is not None else None
+        if checkpoint is not None and self._checkpoint_floor is not None:
+            if (checkpoint["seq"] < self._checkpoint_floor["seq"]
+                    or (checkpoint["seq"] == self._checkpoint_floor["seq"] and checkpoint != self._checkpoint_floor)):
+                raise ValueError("External audit checkpoint moved backwards")
+        result = audit.verify(db, self.audit_key, checkpoint=checkpoint, cache=self._audit_cache)
+        if self._audit_floor is not None:
+            audit.require_checkpoint(db, result["head"], self._audit_floor)
+        self._audit_floor = result["head"]
+        self._checkpoint_floor = checkpoint
 
     @contextmanager
     def tx(self):
@@ -53,20 +74,26 @@ class PilotStore(Engine):
         # Scan the entire history, including on reads and worker heartbeats.
         # Only byte-for-byte identical, previously verified rows reuse crypto
         # results; the mutable audit_head alone can never authorize a cache hit.
-        if self._integrity_failed:
-            raise audit.IntegrityError("Audit integrity failed; operator recovery required")
-        with super().tx() as db:
+        # Serialize local floor publication with COMMIT. An older transaction
+        # must never overwrite a newer committed floor in another thread.
+        with self._audit_lock:
             if self._integrity_failed:
                 raise audit.IntegrityError("Audit integrity failed; operator recovery required")
-            if self._audit_ready:
-                try:
-                    audit.verify(db, self.audit_key, cache=self._audit_cache)
-                except ValueError as exc:
-                    self._integrity_failed = True
-                    logging.getLogger(__name__).critical(
-                        "audit_integrity_failed: storage quarantined; operator recovery required")
-                    raise audit.IntegrityError("Audit integrity failed; operator recovery required") from exc
-            yield db
+            with super().tx() as db:
+                if self._audit_ready:
+                    try:
+                        self._verify_history(db)
+                    except ValueError as exc:
+                        self._integrity_failed = True
+                        logging.getLogger(__name__).critical(
+                            "audit_integrity_failed: storage quarantined; operator recovery required")
+                        raise audit.IntegrityError("Audit integrity failed; operator recovery required") from exc
+                yield db
+                head = json.loads(db.execute("SELECT value FROM config WHERE key='audit_head'").fetchone()[0]) if self._audit_ready else None
+            # Reached only after successful COMMIT. Failed writes must not pin
+            # an uncommitted head and quarantine the next legitimate operation.
+            if head is not None:
+                self._audit_floor = head
 
     def _save(self, db, incident):
         super()._save(db, incident)

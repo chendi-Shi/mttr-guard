@@ -2,6 +2,7 @@ import json
 import sqlite3
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -72,7 +73,9 @@ class OperationalTests(PilotFixture):
 
     def test_keyed_audit_refuses_unverified_legacy_history(self):
         self.receive()
-        with self.store.tx() as db:
+        # Construct a legacy fixture outside the guarded application transaction;
+        # runtime writes must retain their audit head through COMMIT.
+        with closing(sqlite3.connect(self.store.path)) as db, db:
             db.execute("DELETE FROM config WHERE key IN ('audit_key_id','audit_head')")
             db.execute("DROP TABLE audit_records")
         with self.assertRaisesRegex(ValueError, "legacy history"):

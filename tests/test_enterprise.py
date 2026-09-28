@@ -182,6 +182,30 @@ class ASGITests(PilotFixture):
             self.assertIsNone(self.store.claim())
             self.assertIn("mttr_guard_needs_attention 0", client.get("/metrics", headers=self.headers()).text)
 
+    def test_live_api_refuses_signed_database_rollback(self):
+        from test_checkpoints import KEY, copy_database
+        from mttr_guard import checkpoints
+        from mttr_guard.operations import inspect_database
+        self.store = PilotStore(Path(self.temp.name) / "anchored.db", self.clock, audit_key=KEY)
+        iid = self.receive()
+        old = Path(self.temp.name) / "old.db"
+        copy_database(self.store.path, old)
+        self.action(iid, "ack")
+        anchor = Path(self.temp.name) / "trusted.json"
+        checkpoints.export(self.store.path, anchor, KEY)
+        self.store = PilotStore(self.store.path, self.clock, audit_key=KEY, audit_checkpoint=anchor)
+        with self.client() as client:
+            self.assertEqual(client.get(f"/api/incidents/{iid}", headers=self.headers()).status_code, 200)
+            copy_database(old, self.store.path)
+            before = inspect_database(self.store.path, KEY)
+            for path in ("/healthz", "/readyz", f"/api/incidents/{iid}", "/api/operations"):
+                response = client.get(path, headers=self.headers())
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.json()["code"], "audit_integrity_failed")
+            response = client.post(f"/api/incidents/{iid}/ack", headers=self.headers(), json={"request_id": "after-rollback"})
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(inspect_database(self.store.path, KEY), before)
+
     def test_rotated_token_file_takes_effect_without_restart(self):
         root = Path(self.temp.name)
         credential = root / "receiver.token"

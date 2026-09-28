@@ -23,6 +23,8 @@ from pathlib import Path
 from mttr_guard.operations import backup, inspect_database, restore
 from mttr_guard.load_probe import run_probe
 from mttr_guard.pilot_demo import SCOPE, config_data, evidence_server
+from mttr_guard import checkpoints
+from mttr_guard.pilot_store import PilotStore
 from scripts.run_pilot_drill import request
 
 
@@ -88,6 +90,10 @@ def main():
         config = root / "config.json"
         config.write_text(json.dumps(config_data(fixture_url)), encoding="utf-8")
         database = root / "live.db"
+        seed = PilotStore(database, audit_key=audit_key.encode())
+        seed.access_audit("drill-bootstrap", None, "DRILL_BOOTSTRAP", 200, "bootstrap")
+        anchor = root / "trusted-checkpoint.json"
+        checkpoints.export(database, anchor, audit_key.encode())
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -97,7 +103,7 @@ def main():
             log = (root / (role + str(len(processes)) + ".log")).open("wb")
             logs.append(log)
             proc = subprocess.Popen([sys.executable, "-m", "mttr_guard.enterprise", role,
-                "--config", str(config), "--db", str(database), *args], env=environment,
+                "--config", str(config), "--db", str(database), "--audit-checkpoint", str(anchor), *args], env=environment,
                 stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
             processes.append(proc)
             return proc
@@ -139,10 +145,15 @@ def main():
             backup_result = backup(database, saved, audit_key.encode())
             restored_result = restore(saved, restored, audit_key.encode())
             assert backup_result["head"] == restored_result["head"]
+            next_anchor = root / "next-checkpoint.json"
+            checkpoints.export(database, next_anchor, audit_key.encode(), anchor)
+            os.replace(next_anchor, anchor)
+            assert request(base, "/readyz", tokens["operator"])["worker_ready"]
             metrics = request(base, "/api/metrics", tokens["operator"])
             assert metrics["incidents"] == 0 and metrics["excluded_demo_incidents"] == 1
             report = {"mode": "DEMO", "state": incident()["state"], "worker_process_restarted": True,
                 "healthy_windows": incident()["healthy_streak"], "audit_verified": restored_result["keyed"],
+                "external_checkpoint_enabled": True, "checkpoint_advanced_without_restart": True,
                 "audit_records_in_backup": restored_result["records"], "restored_incidents": restored_result["incidents"],
                 "wall_clock_seconds": round(time.time() - started, 2),
                 "browser_check": "passed" if args.browser_check else "not_run",

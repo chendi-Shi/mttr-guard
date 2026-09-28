@@ -6,6 +6,7 @@ import sqlite3
 import sys
 
 from .core import canonical, digest
+from .checkpoints import validate as validate_checkpoint
 
 
 ZERO = "0" * 64
@@ -137,6 +138,8 @@ def verify(db, key, checkpoint=None, *, cache=None):
 
 
 def _verify(db, key, checkpoint, memo):
+    if checkpoint is not None:
+        validate_checkpoint(checkpoint)
     stored_key = db.execute("SELECT value FROM config WHERE key='audit_key_id'").fetchone()
     if not stored_key or stored_key[0] != key_id(key):
         raise ValueError("Audit key mismatch or audit not initialized")
@@ -180,3 +183,15 @@ def _verify(db, key, checkpoint, memo):
         if body_id != iid or scope != row[1] or state != row[2]:
             raise ValueError("Incident lookup fields differ from audited state")
     return {"head": head, "keyed": bool(key), "records": seq, "verified_states": len(states)}
+
+
+def require_checkpoint(db, verified_head, checkpoint):
+    """Check ancestry only AFTER full verification in the same transaction."""
+    validate_checkpoint(checkpoint)
+    if checkpoint["seq"] == 0:
+        return
+    if verified_head["seq"] < checkpoint["seq"]:
+        raise ValueError("Audit history moved behind a trusted checkpoint")
+    row = db.execute("SELECT signature FROM audit_records WHERE seq=?", (checkpoint["seq"],)).fetchone()
+    if not row or not hmac.compare_digest(row[0], checkpoint["signature"]):
+        raise ValueError("Audit history diverged from a trusted checkpoint")

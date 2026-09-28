@@ -1,5 +1,15 @@
 # 本次验证记录
 
+## v0.5.2 外部审计检查点与历史防回退
+
+2026-09-28，Windows / Python 3.14.7，固定 enterprise 依赖：
+
+- 完整 `python -m unittest discover -s tests -v`：186 项通过，47.628 秒。新增 18 项，覆盖签名有效的旧快照、相同序号的合法分支、成功提交立即记忆历史、并发提交、业务回滚和真实 SQLite COMMIT 失败、外部文件热推进/降级/缺失/损坏、缓存开关、worker 隔离、CLI 导出、拒绝旧备份和 API 503。
+- `python -m scripts.run_enterprise_drill`：49.10 秒通过。API 与两个真实 worker 子进程都启用外部检查点，推进检查点后无需重启即可继续运行；DEMO 最终 RECOVERED，观察 worker 重启、三个健康窗口、130 条审计记录的备份还原及运行中篡改隔离均通过。报告新增 `external_checkpoint_enabled` 和 `checkpoint_advanced_without_restart`，均为 true。
+- 旧库拒绝测试通过独立 SQLite 连接构造旧版本夹具；生产代码仍拒绝直接接纳无审计的旧历史。没有修改依赖、界面或容器配置；新增部署文档描述独立检查点目录的只读挂载。未在真实企业存储中发布检查点。
+
+Git diff 空白检查通过。所有新增测试由现有 Linux/Windows × Python 3.11/3.14 CI 自动执行，远端结果以对应提交为准。临时目录中的演练检查点不是独立信任根；本轮不构成生产容量、多机高可用或真实 MTTR 验收。使用方式及信任边界见 [外部审计检查点](audit-checkpoints.md)。
+
 ## v0.5.1 有界任务重试与人工接续
 
 2026-09-21，Windows / Python 3.14.7，固定 enterprise 依赖：

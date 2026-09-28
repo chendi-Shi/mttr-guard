@@ -42,7 +42,7 @@ def file_hash(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
-def backup(source, destination, key):
+def backup(source, destination, key, checkpoint=None):
     source, destination = Path(source).resolve(), Path(destination).resolve()
     manifest = destination.with_suffix(destination.suffix + ".json")
     if destination.exists() or manifest.exists() or source == destination:
@@ -56,7 +56,7 @@ def backup(source, destination, key):
     try:
         with closing(readonly(source)) as src, closing(sqlite3.connect(partial)) as target:
             src.backup(target, pages=256, progress=progress, sleep=.05)
-        checked = inspect_database(partial, key)
+        checked = inspect_database(partial, key, checkpoint)
         content_hash = file_hash(partial)
         # Hard link creation is atomic and fails if the destination already exists.
         os.link(partial, destination)
@@ -68,7 +68,7 @@ def backup(source, destination, key):
         partial.unlink(missing_ok=True)
 
 
-def restore(source, destination, key):
+def restore(source, destination, key, checkpoint=None):
     source, destination = Path(source).resolve(), Path(destination).resolve()
     if destination.exists() or source == destination:
         raise ValueError("Restore refuses to overwrite any existing database")
@@ -76,6 +76,8 @@ def restore(source, destination, key):
     if manifest.get("format") != 1 or manifest["sha256"] != file_hash(source):
         raise ValueError("Backup file hash mismatch")
     inspect_database(source, key, manifest["checkpoint"])
+    if checkpoint is not None:
+        inspect_database(source, key, checkpoint)
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.parent / (destination.name + ".partial-" + uuid.uuid4().hex)
     try:
@@ -90,6 +92,8 @@ def restore(source, destination, key):
             db.execute("UPDATE workers SET state='STOPPED'")
             db.commit()
         checked = inspect_database(partial, key, manifest["checkpoint"])
+        if checkpoint is not None:
+            inspect_database(partial, key, checkpoint)
         os.link(partial, destination)
         return {"database": str(destination), **checked}
     finally:
