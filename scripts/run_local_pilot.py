@@ -7,10 +7,12 @@ import hashlib
 import json
 import os
 import platform
+import shutil
 import secrets
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -56,12 +58,16 @@ def queries():
 
 
 class Traffic:
+    WORKERS = 12
+    INTERVAL = .3
+
     def __init__(self, base):
         self.base, self.stop = base, threading.Event()
         self.lock, self.sequence, self.results = threading.Lock(), 0, {}
-        self.pool = ThreadPoolExecutor(max_workers=8)
+        self.pool = ThreadPoolExecutor(max_workers=self.WORKERS)
 
-    def run(self):
+    def run(self, offset):
+        self.stop.wait(offset)
         while not self.stop.is_set():
             started = time.monotonic()
             with self.lock:
@@ -78,11 +84,11 @@ class Traffic:
             with self.lock:
                 key = track + "/" + code
                 self.results[key] = self.results.get(key, 0) + 1
-            self.stop.wait(max(0, .2 - (time.monotonic() - started)))
+            self.stop.wait(max(0, self.INTERVAL - (time.monotonic() - started)))
 
     def start(self):
-        for _ in range(8):
-            self.pool.submit(self.run)
+        for index in range(self.WORKERS):
+            self.pool.submit(self.run, index * self.INTERVAL / self.WORKERS)
 
     def close(self):
         self.stop.set()
@@ -99,6 +105,8 @@ def main():
     if root == artifact_root or not root.is_relative_to(artifact_root):
         parser.error("Output must be a new subdirectory of ignored artifacts/")
     root.mkdir(parents=True, exist_ok=False)
+    scratch = tempfile.TemporaryDirectory(prefix="mttr-local-pilot-")
+    scratch_root = Path(scratch.name)
     binaries = Path(args.tools).resolve()
     started = time.time()
     phases, processes, logs = [], [], []
@@ -128,7 +136,8 @@ def main():
         "MTTR_LAB_RECEIVER_TOKEN": tokens["receiver"], "MTTR_AUDIT_KEY": tokens["audit"]}
     runtime_env.pop("MTTR_AUDIT_KEY_FILE", None)
     runtime_env.pop("MTTR_LAB_CONTROL_TOKEN", None)
-    lab_env = {**os.environ, "MTTR_LAB_CONTROL_TOKEN": tokens["control"], "MTTR_LAB_EVIDENCE_TOKEN": tokens["evidence"]}
+    lab_env = {**os.environ, "MTTR_LAB_CONTROL_TOKEN": tokens["control"], "MTTR_LAB_EVIDENCE_TOKEN": tokens["evidence"],
+               "MTTR_LAB_SPAN_FILE": str(scratch_root / "spans.jsonl")}
 
     def phase(name, **details):
         row = {"phase": name, "at": time.time(), **details}
@@ -173,6 +182,7 @@ def main():
                   "min_qps_ratio": .5, "observation_timeout_seconds": 240}
         plan = {"scenario": "r42 checkout discount parser regression", "warmup_seconds": 40,
             "target_total_rps": 40, "canary_fraction": .05, "baseline_canary_qps": 2,
+            "traffic_driver": {"workers": Traffic.WORKERS, "interval_seconds": Traffic.INTERVAL},
             "alert": {"expression": f'({query["error_rate"]}) > 0.05 and ({query["control_error_rate"]}) < 0.01', "for": "4s"},
             "recovery_policy": policy, "allowed_data": ["aggregate request metrics", "synthetic request spans", "local release records"],
             "fault_target": "Local lab only", "human_decision_required": True, "control_group_for_mttr": False}
@@ -208,9 +218,9 @@ def main():
                 raise ValueError("Monitoring configuration invalid")
         launch("service", [sys.executable, "-m", "scripts.local_pilot_service", "--port", str(service_port), "--output", str(root)], lab_env)
         launch("prometheus", [str(binaries / "prometheus.exe"), "--config.file=" + str(root / "prometheus.json"),
-            "--web.listen-address=127.0.0.1:" + str(prometheus_port), "--storage.tsdb.path=" + str(root / "prometheus-data"), "--storage.tsdb.retention.time=2h"])
+            "--web.listen-address=127.0.0.1:" + str(prometheus_port), "--storage.tsdb.path=" + str(scratch_root / "prometheus-data"), "--storage.tsdb.retention.time=2h"])
         launch("alertmanager", [str(binaries / "alertmanager.exe"), "--config.file=" + str(root / "alertmanager.json"),
-            "--web.listen-address=127.0.0.1:" + str(alertmanager_port), "--cluster.listen-address=", "--storage.path=" + str(root / "alertmanager-data")])
+            "--web.listen-address=127.0.0.1:" + str(alertmanager_port), "--cluster.listen-address=", "--storage.path=" + str(scratch_root / "alertmanager-data")])
         for role, extra in (("api", ["--port", str(api_port)]), ("diagnose", ["--queue", "diagnose"]), ("observe", ["--queue", "observe"])):
             launch(role, [sys.executable, "-m", "mttr_guard.enterprise", "api" if role == "api" else "worker",
                 "--config", str(root / "config.local.json"), "--db", str(root / "pilot.db"), *extra], runtime_env)
@@ -242,6 +252,21 @@ def main():
                     message = message.replace(secret, "[REDACTED]")
                 write(root / "preflight-diagnostic.json", {"error_type": type(diagnostic).__name__, "message": message})
             raise ValueError("Read-only source preflight did not pass")
+        baseline = json.loads((root / "preflight.json").read_text(encoding="utf-8"))
+        m = baseline["metrics"]
+        baseline_checks = {
+            "source_contract": baseline["status"] == "source_contract_passed",
+            "canary_error_rate": m["error_rate"] < policy["max_error_rate"],
+            "control_error_rate": m["control_error_rate"] < policy["max_error_rate"],
+            "p99_ms": m["p99_ms"] < policy["max_p99_ms"],
+            "canary_qps": m["qps"] >= config["services"][0]["baseline_qps"] * policy["min_qps_ratio"],
+            "sample_count": min(m["requests"], m["control_requests"]) >= policy["min_requests"],
+            "sample_age": m["sample_age_seconds"] <= policy["max_sample_age_seconds"],
+        }
+        write(root / "baseline-gate.json", {"checks": baseline_checks, "passed": all(baseline_checks.values()),
+                                            "thresholds": policy, "actual_metrics": m})
+        if not all(baseline_checks.values()):
+            raise ValueError("Baseline is not healthy under the registered recovery policy")
         phase("PREFLIGHT_PASSED")
         released = request(service_url + "/release", tokens["control"], {"expected_revision": "r41", "target_revision": "r42",
             "actor": "fault-injection-harness", "reason": "Registered local discount parser fault"})
@@ -312,6 +337,14 @@ def main():
         if traffic:
             traffic.close()
             report["http_outcomes"] = traffic.results
+        service_process = next((process for name, process in processes if name == "service"), None)
+        if service_process is not None and service_process.poll() is None:
+            try:
+                request(service_url + "/stop", tokens["control"], {})
+                service_process.wait(timeout=20)
+                report["span_writer_flushed"] = True
+            except (OSError, urllib.error.URLError, subprocess.TimeoutExpired):
+                report["span_writer_flushed"] = False
         for _, process in reversed(processes):
             if process.poll() is None:
                 process.terminate()
@@ -323,11 +356,16 @@ def main():
                 process.wait(timeout=5)
         for log in logs:
             log.close()
+        span_file = scratch_root / "spans.jsonl"
+        if span_file.exists():
+            shutil.copy2(span_file, root / "spans.jsonl")
+        report["monitoring_data_storage"] = "OS temporary directory during live trial; captured query responses and span log retained in ignored artifacts"
+        scratch.cleanup()
         report["owned_processes_stopped"] = all(process.poll() is not None for _, process in processes)
         report["elapsed_seconds"] = time.time() - started
         report["phases"] = phases
         report["artifacts_sha256"] = {}
-        for name in ("plan.json", "spans.jsonl", "releases.jsonl", "preflight.json", "baseline-prometheus.json", "fault-prometheus.json",
+        for name in ("plan.json", "spans.jsonl", "releases.jsonl", "preflight.json", "baseline-gate.json", "baseline-prometheus.json", "fault-prometheus.json",
                      "recovery-prometheus.json", "diagnosis.json", "final-incident.json", "timeline.json", "decision.json"):
             path = root / name
             if path.exists():

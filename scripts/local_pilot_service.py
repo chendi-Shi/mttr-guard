@@ -33,18 +33,46 @@ class SpanLog(SpanExporter):
     def __init__(self, root):
         self.lock = threading.Lock()
         self.recent = deque(maxlen=20000)
-        self.path = root / "spans.jsonl"
+        self.path = Path(os.environ.get("MTTR_LAB_SPAN_FILE", str(root / "spans.jsonl")))
+        self.pending = []
+        self.wake = threading.Event()
+        self.stopping = threading.Event()
+        self.output = self.path.open("a", encoding="utf-8", buffering=65536)
+        self.writer = threading.Thread(target=self._write_loop, daemon=True)
+        self.writer.start()
 
     def export(self, spans):
-        with self.lock, self.path.open("a", encoding="utf-8") as output:
+        with self.lock:
             for span in spans:
                 row = {"trace_id": format(span.context.trace_id, "032x"), "span_id": format(span.context.span_id, "016x"),
                     "parent_span_id": format(span.parent.span_id, "016x") if span.parent else None,
                     "name": span.name, "started_at": span.start_time / 1e9, "ended_at": span.end_time / 1e9,
                     "status": span.status.status_code.name, "attributes": dict(span.attributes or {})}
                 self.recent.append(row)
-                output.write(json.dumps(row) + "\n")
+                self.pending.append(json.dumps(row) + "\n")
+            if len(self.pending) >= 200:
+                self.wake.set()
         return SpanExportResult.SUCCESS
+
+    def _write_loop(self):
+        while True:
+            self.wake.wait(.5)
+            self.wake.clear()
+            with self.lock:
+                batch, self.pending = self.pending, []
+            if batch:
+                self.output.writelines(batch)
+                self.output.flush()
+            if self.stopping.is_set():
+                break
+        self.output.close()
+
+    def shutdown(self):
+        self.stopping.set()
+        self.wake.set()
+        self.writer.join(timeout=20)
+        if self.writer.is_alive():
+            raise TimeoutError("Local span writer did not stop")
 
     def snapshot(self, now):
         with self.lock:
@@ -130,8 +158,14 @@ def make_server(lab, port):
             return hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token)
 
         def do_POST(self):
-            if self.path != "/release" or not self.authorized(lab.control_token):
+            if not self.authorized(lab.control_token):
                 return self.respond(403, {"error": "Denied"})
+            if self.path == "/stop":
+                self.respond(200, {"stopping": True})
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return
+            if self.path != "/release":
+                return self.respond(404, {"error": "Not found"})
             try:
                 size = int(self.headers.get("Content-Length", "0"))
                 if not 0 < size <= 4096:

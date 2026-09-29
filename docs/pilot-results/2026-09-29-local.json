@@ -1,0 +1,683 @@
+{
+  "schema_version": 1,
+  "domain": "LOCAL_LAB",
+  "date": "2026-09-29",
+  "source_commit": "8df7a27b5a330ba089fe7b20ded8326275f23ab2",
+  "environment": "Windows AMD64, Python 3.14.7, Prometheus 3.5.0, Alertmanager 0.28.1",
+  "scenario": "local checkout r42 canary discount parsing regression; synthetic 5% traffic",
+  "human_authorization": "Chat user explicitly instructed rollback after attempt 01 had timed out; subsequent same-scenario recommendations were revalidated and bound to that instruction.",
+  "claim_limits": [
+    "No complete three-window recovery",
+    "No human decision after the final fresh recommendation",
+    "No production environment or causal MTTR reduction evidence",
+    "Only one known fault type and local synthetic traffic"
+  ],
+  "attempts": [
+    {
+      "run": 1,
+      "registered_plan_sha256": "2d2b0b0bc64d330dd4081bbba090ae49e45439f6bc790cd5415497c6e8d8c6b2",
+      "state": "FAILED",
+      "failure_phase": "AWAITING_OPERATOR",
+      "error_type": "TimeoutError",
+      "phases": [
+        "CONFIGURING",
+        "WARMING_UP",
+        "PREFLIGHT_PASSED",
+        "FAULT_INJECTED",
+        "AWAITING_OPERATOR",
+        "FAILED"
+      ],
+      "preflight_status": "source_contract_passed",
+      "preflight_metrics": {
+        "error_rate": 0.0,
+        "control_error_rate": 0.0,
+        "p99_ms": 477.49999999999994,
+        "qps": 0.9642857142857142,
+        "requests": 28.928571428571427,
+        "control_requests": 552.8571428571429,
+        "sample_age_seconds": 1.872831106185913
+      },
+      "diagnosis_state": "RECOMMENDED",
+      "diagnosis_attention_reason": null,
+      "diagnosis_metrics": {
+        "control_error_rate": 0.0,
+        "control_requests": 595.8845384395541,
+        "error_rate": 0.2391939605833307,
+        "p99_ms": 475.83333333333337,
+        "qps": 1.0330344384109746,
+        "requests": 30.991033152329237,
+        "sample_age_seconds": 2.5130696296691895
+      },
+      "diagnosis_traces": {
+        "downstream_healthy": true,
+        "failing_span": "checkout.validate",
+        "sample_count": 32
+      },
+      "recommended_rollback": "r41",
+      "release_revisions": [
+        "r41",
+        "r42"
+      ],
+      "observed_state": "RECOMMENDED",
+      "observation_count": 0,
+      "longest_healthy_streak": 0,
+      "observation_checks": [],
+      "measured_recovery_seconds": null,
+      "http_outcomes": {
+        "stable/200": 7061,
+        "canary/200": 35,
+        "canary/500": 336
+      },
+      "span_log": {
+        "recorded": 22296,
+        "failed_validation": 336
+      },
+      "audit_verified": {
+        "keyed": true,
+        "records": 14,
+        "verified_states": 1,
+        "incidents": 1,
+        "pending_jobs": 0
+      },
+      "capture_flushed": null,
+      "report_sha256": "6b391b0baffbc8bd720e1c07899ba634b26263717c56cbe7e231a1d532b70c3d",
+      "alert_to_recommendation_seconds": 1.8836750984191895
+    },
+    {
+      "run": 2,
+      "registered_plan_sha256": "2d2b0b0bc64d330dd4081bbba090ae49e45439f6bc790cd5415497c6e8d8c6b2",
+      "state": "FAILED",
+      "failure_phase": "FAULT_INJECTED",
+      "error_type": "ValueError",
+      "phases": [
+        "CONFIGURING",
+        "WARMING_UP",
+        "PREFLIGHT_PASSED",
+        "FAULT_INJECTED",
+        "FAILED"
+      ],
+      "preflight_status": "source_contract_passed",
+      "preflight_metrics": {
+        "error_rate": 0.0,
+        "control_error_rate": 0.0,
+        "p99_ms": 900.0000000000003,
+        "qps": 0.7142857142857142,
+        "requests": 21.428571428571427,
+        "control_requests": 406.07142857142856,
+        "sample_age_seconds": 0.7463645935058594
+      },
+      "diagnosis_state": "NEEDS_ATTENTION",
+      "diagnosis_attention_reason": "流量不足，不能据此确认版本回归或恢复。",
+      "diagnosis_metrics": {
+        "control_error_rate": 0.0,
+        "control_requests": 473.57142857142856,
+        "error_rate": 0.4066623343599017,
+        "p99_ms": 491.42857142857144,
+        "qps": 0.8426904761904761,
+        "requests": 25.280714285714286,
+        "sample_age_seconds": 1.144792079925537
+      },
+      "diagnosis_traces": {
+        "downstream_healthy": true,
+        "failing_span": "checkout.validate",
+        "sample_count": 25
+      },
+      "recommended_rollback": null,
+      "release_revisions": [
+        "r41",
+        "r42"
+      ],
+      "observed_state": "NEEDS_ATTENTION",
+      "observation_count": 0,
+      "longest_healthy_streak": 0,
+      "observation_checks": [],
+      "measured_recovery_seconds": null,
+      "http_outcomes": {
+        "stable/200": 952,
+        "canary/200": 37,
+        "canary/500": 13
+      },
+      "span_log": {
+        "recorded": 3006,
+        "failed_validation": 13
+      },
+      "audit_verified": {
+        "keyed": true,
+        "records": 15,
+        "verified_states": 1,
+        "incidents": 1,
+        "pending_jobs": 0
+      },
+      "capture_flushed": null,
+      "report_sha256": "f47c2fc4057ce5002f72f4323b2792fb1b4ae21eae0aa5d0a82c5893b97beefc"
+    },
+    {
+      "run": 3,
+      "registered_plan_sha256": "2d2b0b0bc64d330dd4081bbba090ae49e45439f6bc790cd5415497c6e8d8c6b2",
+      "state": "FAILED",
+      "failure_phase": "FAULT_INJECTED",
+      "error_type": "ValueError",
+      "phases": [
+        "CONFIGURING",
+        "WARMING_UP",
+        "PREFLIGHT_PASSED",
+        "FAULT_INJECTED",
+        "FAILED"
+      ],
+      "preflight_status": "source_contract_passed",
+      "preflight_metrics": {
+        "error_rate": 0.0,
+        "control_error_rate": 0.0,
+        "p99_ms": 968.3333333333334,
+        "qps": 0.6782565237568271,
+        "requests": 20.347695712704812,
+        "control_requests": 375.8969050083889,
+        "sample_age_seconds": 0.914384126663208
+      },
+      "diagnosis_state": "NEEDS_ATTENTION",
+      "diagnosis_attention_reason": "灰度或对照组样本不足，先核实请求量和采集范围。",
+      "diagnosis_metrics": {
+        "control_error_rate": 0.0,
+        "control_requests": 183.1946577152448,
+        "error_rate": 0.4398721414808287,
+        "p99_ms": 992.4999999999999,
+        "qps": 0.31877060791105716,
+        "requests": 9.563118237331715,
+        "sample_age_seconds": 1.2757618427276611
+      },
+      "diagnosis_traces": {
+        "downstream_healthy": true,
+        "failing_span": "checkout.validate",
+        "sample_count": 9
+      },
+      "recommended_rollback": null,
+      "release_revisions": [
+        "r41",
+        "r42"
+      ],
+      "observed_state": "NEEDS_ATTENTION",
+      "observation_count": 0,
+      "longest_healthy_streak": 0,
+      "observation_checks": [],
+      "measured_recovery_seconds": null,
+      "http_outcomes": {
+        "stable/200": 673,
+        "canary/200": 28,
+        "canary/500": 7
+      },
+      "span_log": {
+        "recorded": 2124,
+        "failed_validation": 7
+      },
+      "audit_verified": {
+        "keyed": true,
+        "records": 18,
+        "verified_states": 1,
+        "incidents": 1,
+        "pending_jobs": 0
+      },
+      "capture_flushed": null,
+      "report_sha256": "df41312a1ff0c9ba70b0d85d692ab32191bca0008165157f57684b13bf95cb7f"
+    },
+    {
+      "run": 4,
+      "registered_plan_sha256": "2d2b0b0bc64d330dd4081bbba090ae49e45439f6bc790cd5415497c6e8d8c6b2",
+      "state": "NEEDS_ATTENTION",
+      "failure_phase": null,
+      "error_type": null,
+      "phases": [
+        "CONFIGURING",
+        "WARMING_UP",
+        "PREFLIGHT_PASSED",
+        "FAULT_INJECTED",
+        "AWAITING_OPERATOR",
+        "OPERATOR_DECISION_RECORDED",
+        "MANUAL_ROLLBACK_APPLIED",
+        "COMPLETED"
+      ],
+      "preflight_status": "source_contract_passed",
+      "preflight_metrics": {
+        "error_rate": 0.0,
+        "control_error_rate": 0.0,
+        "p99_ms": 869.9999999999992,
+        "qps": 0.9285714285714285,
+        "requests": 27.857142857142858,
+        "control_requests": 523.9285714285714,
+        "sample_age_seconds": 0.9661412239074707
+      },
+      "diagnosis_state": "RECOMMENDED",
+      "diagnosis_attention_reason": null,
+      "diagnosis_metrics": {
+        "control_error_rate": 0.0,
+        "control_requests": 590.5469615233468,
+        "error_rate": 0.23612437284074933,
+        "p99_ms": 927.5,
+        "qps": 1.0289200100032152,
+        "requests": 30.867600300096456,
+        "sample_age_seconds": 1.5757007598876953
+      },
+      "diagnosis_traces": {
+        "downstream_healthy": true,
+        "failing_span": "checkout.validate",
+        "sample_count": 30
+      },
+      "recommended_rollback": "r41",
+      "release_revisions": [
+        "r41",
+        "r42",
+        "r41"
+      ],
+      "observed_state": "NEEDS_ATTENTION",
+      "observation_count": 7,
+      "longest_healthy_streak": 2,
+      "observation_checks": [
+        {
+          "healthy": false,
+          "reasons": [
+            "流量不足"
+          ],
+          "qps": 0.8571428571428571,
+          "p99_ms": 495.0,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "流量不足"
+          ],
+          "qps": 0.9637694092450474,
+          "p99_ms": 483.12499999999994,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": true,
+          "reasons": [],
+          "qps": 1.1428571428571428,
+          "p99_ms": 460.0000000000003,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": true,
+          "reasons": [],
+          "qps": 1.0,
+          "p99_ms": 482.5,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "流量不足"
+          ],
+          "qps": 0.8928571428571428,
+          "p99_ms": 491.0714285714286,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "P99 未恢复",
+            "流量不足"
+          ],
+          "qps": 0.7142346975216054,
+          "p99_ms": 899.9999999999993,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "P99 未恢复",
+            "流量不足",
+            "样本不足"
+          ],
+          "qps": 0.5715918833952558,
+          "p99_ms": 973.333333333333,
+          "error_rate": 0.0
+        }
+      ],
+      "measured_recovery_seconds": null,
+      "http_outcomes": {
+        "stable/200": 5497,
+        "canary/200": 256,
+        "canary/500": 33
+      },
+      "span_log": {
+        "recorded": 17358,
+        "failed_validation": 33
+      },
+      "audit_verified": {
+        "keyed": true,
+        "records": 167,
+        "verified_states": 1,
+        "incidents": 1,
+        "pending_jobs": 0
+      },
+      "capture_flushed": true,
+      "report_sha256": "5ecaf6761c5f6b04494b61bdbd38ba1370422e271033e0d234231bcd2709a75f",
+      "alert_to_recommendation_seconds": 3.1665682792663574
+    },
+    {
+      "run": 5,
+      "registered_plan_sha256": "2d2b0b0bc64d330dd4081bbba090ae49e45439f6bc790cd5415497c6e8d8c6b2",
+      "state": "NEEDS_ATTENTION",
+      "failure_phase": null,
+      "error_type": null,
+      "phases": [
+        "CONFIGURING",
+        "WARMING_UP",
+        "PREFLIGHT_PASSED",
+        "FAULT_INJECTED",
+        "AWAITING_OPERATOR",
+        "OPERATOR_DECISION_RECORDED",
+        "MANUAL_ROLLBACK_APPLIED",
+        "COMPLETED"
+      ],
+      "preflight_status": "source_contract_passed",
+      "preflight_metrics": {
+        "error_rate": 0.0,
+        "control_error_rate": 0.0,
+        "p99_ms": 247.87499999999997,
+        "qps": 1.2142857142857142,
+        "requests": 36.42857142857143,
+        "control_requests": 710.3571428571429,
+        "sample_age_seconds": 2.2091166973114014
+      },
+      "diagnosis_state": "RECOMMENDED",
+      "diagnosis_attention_reason": null,
+      "diagnosis_metrics": {
+        "control_error_rate": 0.0,
+        "control_requests": 675.0,
+        "error_rate": 0.2335927536705798,
+        "p99_ms": 247.64285714285714,
+        "qps": 1.1649904761904761,
+        "requests": 34.949714285714286,
+        "sample_age_seconds": 1.368269681930542
+      },
+      "diagnosis_traces": {
+        "downstream_healthy": true,
+        "failing_span": "checkout.validate",
+        "sample_count": 35
+      },
+      "recommended_rollback": "r41",
+      "release_revisions": [
+        "r41",
+        "r42",
+        "r41"
+      ],
+      "observed_state": "NEEDS_ATTENTION",
+      "observation_count": 7,
+      "longest_healthy_streak": 2,
+      "observation_checks": [
+        {
+          "healthy": false,
+          "reasons": [
+            "流量不足"
+          ],
+          "qps": 0.8928571428571428,
+          "p99_ms": 479.16666666666674,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": true,
+          "reasons": [],
+          "qps": 1.0,
+          "p99_ms": 464.99999999999994,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": true,
+          "reasons": [],
+          "qps": 1.1428571428571428,
+          "p99_ms": 420.0000000000008,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "流量不足"
+          ],
+          "qps": 0.9284387944579346,
+          "p99_ms": 435.0000000000003,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "流量不足"
+          ],
+          "qps": 0.7859949982136477,
+          "p99_ms": 492.14285714285717,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "P99 未恢复",
+            "流量不足"
+          ],
+          "qps": 0.9285714285714285,
+          "p99_ms": 869.9999999999992,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "P99 未恢复",
+            "流量不足"
+          ],
+          "qps": 0.8571428571428571,
+          "p99_ms": 880.0000000000001,
+          "error_rate": 0.0
+        }
+      ],
+      "measured_recovery_seconds": null,
+      "http_outcomes": {
+        "stable/200": 6235,
+        "canary/200": 287,
+        "canary/500": 41
+      },
+      "span_log": {
+        "recorded": 19689,
+        "failed_validation": 41
+      },
+      "audit_verified": {
+        "keyed": true,
+        "records": 164,
+        "verified_states": 1,
+        "incidents": 1,
+        "pending_jobs": 0
+      },
+      "capture_flushed": true,
+      "report_sha256": "10e87a1f8c5d6c8a16c472fd5ecb95185a400a164a5a361cdccab335dd8327c6",
+      "alert_to_recommendation_seconds": 3.0693271160125732
+    },
+    {
+      "run": 6,
+      "registered_plan_sha256": "2d2b0b0bc64d330dd4081bbba090ae49e45439f6bc790cd5415497c6e8d8c6b2",
+      "state": "NEEDS_ATTENTION",
+      "failure_phase": null,
+      "error_type": null,
+      "phases": [
+        "CONFIGURING",
+        "WARMING_UP",
+        "PREFLIGHT_PASSED",
+        "FAULT_INJECTED",
+        "AWAITING_OPERATOR",
+        "OPERATOR_DECISION_RECORDED",
+        "MANUAL_ROLLBACK_APPLIED",
+        "COMPLETED"
+      ],
+      "preflight_status": "source_contract_passed",
+      "preflight_metrics": {
+        "error_rate": 0.0,
+        "control_error_rate": 0.0,
+        "p99_ms": 759.9999999999993,
+        "qps": 1.713551335142082,
+        "requests": 51.40654005426246,
+        "control_requests": 970.2984435242039,
+        "sample_age_seconds": 0.35916638374328613
+      },
+      "diagnosis_state": "RECOMMENDED",
+      "diagnosis_attention_reason": null,
+      "diagnosis_metrics": {
+        "control_error_rate": 0.0,
+        "control_requests": 885.0,
+        "error_rate": 0.28971143190356574,
+        "p99_ms": 889.9999999999994,
+        "qps": 1.5587226190476189,
+        "requests": 46.761678571428575,
+        "sample_age_seconds": 1.1659204959869385
+      },
+      "diagnosis_traces": {
+        "downstream_healthy": true,
+        "failing_span": "checkout.validate",
+        "sample_count": 47
+      },
+      "recommended_rollback": "r41",
+      "release_revisions": [
+        "r41",
+        "r42",
+        "r41"
+      ],
+      "observed_state": "NEEDS_ATTENTION",
+      "observation_count": 7,
+      "longest_healthy_streak": 0,
+      "observation_checks": [
+        {
+          "healthy": false,
+          "reasons": [
+            "P99 未恢复"
+          ],
+          "qps": 1.6426811413062885,
+          "p99_ms": 942.5000000000003,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "P99 未恢复"
+          ],
+          "qps": 1.214155626182909,
+          "p99_ms": 966.0000000000002,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "P99 未恢复"
+          ],
+          "qps": 1.3568036562288,
+          "p99_ms": 904.9999999999994,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "P99 未恢复"
+          ],
+          "qps": 1.346153846153846,
+          "p99_ms": 956.2500000000002,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "P99 未恢复"
+          ],
+          "qps": 1.2142857142857142,
+          "p99_ms": 957.4999999999997,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "P99 未恢复"
+          ],
+          "qps": 1.213895533578493,
+          "p99_ms": 943.3333333333334,
+          "error_rate": 0.0
+        },
+        {
+          "healthy": false,
+          "reasons": [
+            "P99 未恢复"
+          ],
+          "qps": 1.1057212155799687,
+          "p99_ms": 977.8571428571429,
+          "error_rate": 0.0
+        }
+      ],
+      "measured_recovery_seconds": null,
+      "http_outcomes": {
+        "stable/200": 9187,
+        "canary/200": 392,
+        "canary/500": 91
+      },
+      "span_log": {
+        "recorded": 29010,
+        "failed_validation": 91
+      },
+      "audit_verified": {
+        "keyed": true,
+        "records": 161,
+        "verified_states": 1,
+        "incidents": 1,
+        "pending_jobs": 0
+      },
+      "capture_flushed": true,
+      "report_sha256": "4b9abed9e4422a2f044d7e22a1f17f8b361b55739b3298c3e6e07cf97a564294",
+      "alert_to_recommendation_seconds": 2.453202247619629
+    },
+    {
+      "run": 7,
+      "registered_plan_sha256": "8fe5611306c4cdec91f91770e4488195194bd1ce2eee97e35ecd8bab1d481ec6",
+      "state": "FAILED",
+      "failure_phase": "WARMING_UP",
+      "error_type": "ValueError",
+      "phases": [
+        "CONFIGURING",
+        "WARMING_UP",
+        "FAILED"
+      ],
+      "preflight_status": "insufficient_samples",
+      "preflight_metrics": {
+        "error_rate": 0.0,
+        "control_error_rate": 0.0,
+        "p99_ms": 987.1428571428571,
+        "qps": 0.6429719592784428,
+        "requests": 19.28915877835328,
+        "control_requests": 370.7804965172353,
+        "sample_age_seconds": 2.490365505218506
+      },
+      "diagnosis_state": null,
+      "diagnosis_attention_reason": null,
+      "diagnosis_metrics": null,
+      "diagnosis_traces": null,
+      "recommended_rollback": null,
+      "release_revisions": [
+        "r41"
+      ],
+      "observed_state": null,
+      "observation_count": 0,
+      "longest_healthy_streak": 0,
+      "observation_checks": [],
+      "measured_recovery_seconds": null,
+      "http_outcomes": {
+        "stable/200": 720,
+        "canary/200": 37
+      },
+      "span_log": {
+        "recorded": 2271,
+        "failed_validation": 0
+      },
+      "audit_verified": {
+        "keyed": true,
+        "records": 0,
+        "verified_states": 0,
+        "incidents": 0,
+        "pending_jobs": 0
+      },
+      "capture_flushed": true,
+      "report_sha256": "1e7ca3e4695823ca3a9a4a3a6b8932e3a90157fb4fc21422bd5f4a6a03565f9b"
+    }
+  ]
+}

@@ -71,6 +71,10 @@ class LocalPilotServiceTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 403)
         caught.exception.close()
         with self.assertRaises(urllib.error.HTTPError) as caught:
+            request(self.base + "/stop", "test-evidence", {})
+        self.assertEqual(caught.exception.code, 403)
+        caught.exception.close()
+        with self.assertRaises(urllib.error.HTTPError) as caught:
             self.release("r42", "wrong-revision")
         self.assertEqual(caught.exception.code, 409)
         caught.exception.close()
