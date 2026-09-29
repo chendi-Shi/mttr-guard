@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "domain": "LOCAL_LAB",
+  "scenario": "downstream",
+  "status": "SAFELY_ESCALATED",
+  "expected_outcome": "no_rollback_recommendation",
+  "source_preflight": "passed",
+  "incident_id": "eccb613ffc8e4ab790f8d33560e5c204",
+  "timeline": {
+    "analysis_ready": 1790652805.6315637,
+    "evidence_ready": 1790652805.0353692,
+    "received": 1790652802.39731
+  },
+  "detected_at": 1790652798.454,
+  "alert_to_analysis_seconds": 7.177563667297363,
+  "diagnosis_state": "NEEDS_ATTENTION",
+  "verdicts": {
+    "metrics": "regression",
+    "traces": "downstream_failure",
+    "changes": "recent_change",
+    "critic": "veto"
+  },
+  "recommendation": null,
+  "fault_metrics": {
+    "control_error_rate": 0.0,
+    "control_requests": 1089.8968630669856,
+    "error_rate": 0.5137801197008517,
+    "p99_ms": 23.012500000000006,
+    "qps": 1.8349475988246913,
+    "requests": 55.04842796474074,
+    "sample_age_seconds": 0.8563137054443359
+  },
+  "fault_traces": {
+    "downstream_healthy": false,
+    "failing_span": "none",
+    "sample_count": 58
+  },
+  "deployment": {
+    "revision": "r43",
+    "previous_revision": "r41",
+    "changed_at": 1790652790.0340095,
+    "known_good": true,
+    "schema_migration": false,
+    "rollout_complete": true,
+    "traffic_percent": 5
+  },
+  "release_revisions": [
+    "r41",
+    "r43"
+  ],
+  "http_outcomes": {
+    "stable/200": 2320,
+    "canary/200": 89,
+    "canary/500": 33
+  },
+  "spans": {
+    "failed_inventory": 33,
+    "linked_failed_inventory": 33,
+    "stable_checkout_failures": 0
+  },
+  "audit": {
+    "head": {
+      "seq": 17,
+      "signature": "e9926b28fa3504ca0e10f95016e6844969d0b1fa1c417d5869a08da3d2e1e67d"
+    },
+    "keyed": true,
+    "records": 17,
+    "incidents": 1,
+    "pending_jobs": 0
+  },
+  "artifacts_sha256": {
+    "plan.json": "3a8efaea453af0cfc8eeadae5dc084d17d1cd928537f1367cdebe25394b2022f",
+    "spans.jsonl": "63436197e902aeb5d02ad94537bf41ba6dd9c763cecc3994dcfe31b1b9729509",
+    "releases.jsonl": "865933f576867eea9dde87b5f8c7282000fd4fa51dbc58f1e352b0697eab45fe",
+    "preflight.json": "68f09d34f283ac03c59716f5fc3c82b1083179a6207399b725fb1f55521d3756",
+    "baseline-gate.json": "ad128dba0edb2b9c3d0cff54d781c45b7365bb26b9237ecb05171fc57ba0c71b",
+    "baseline-prometheus.json": "fa29badfd8acda6f371def1b60c5b4091da1e4beb673cf3fa67f9a45a92cad9d",
+    "fault-prometheus.json": "04c8799a37ffb2b9ef1c2b92374b12f32966d1700c6bf51a41e8d5aa923937c0",
+    "fault-evidence.json": "5e92eddf395d55a3e34974423cdaa2802a684cf1d7423f0812f7a11568421e3c",
+    "diagnosis.json": "17d6718d639bff749c736e0f9befe9e7d61f9f35ba6cb9ec58ae335e3deba6f7",
+    "final-incident.json": "17d6718d639bff749c736e0f9befe9e7d61f9f35ba6cb9ec58ae335e3deba6f7",
+    "timeline.json": "23750047cb2284824d21ff94dd31ceb6c8bf3a507e954ddfa492796af83c5299"
+  },
+  "claims": {
+    "production_readiness": "not_assessed",
+    "causal_mttr_reduction": "not_established"
+  },
+  "prior_failed_attempt": {
+    "status": "FAILED",
+    "failure_phase": "FAULT_INJECTED",
+    "error_type": "TimeoutError",
+    "http_outcomes": {
+      "stable/200": 4972,
+      "canary/200": 95,
+      "canary/500": 175,
+      "stable/500": 175
+    }
+  }
+}

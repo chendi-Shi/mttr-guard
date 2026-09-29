@@ -23,6 +23,9 @@
 python -m pip install -r requirements-local-pilot.txt
 python -m scripts.install_local_pilot_tools
 python -m scripts.run_local_pilot --output artifacts/local-pilot-my-run
+
+# 负向演练：下游 inventory 仅对灰度返回 HTTP 503，预期拒绝回退建议
+python -m scripts.run_local_pilot --scenario downstream --output artifacts/local-pilot-downstream-run
 ```
 
 每次必须使用新的输出目录。脚本先写入 `plan.json`，再预热、运行现有只读预检、注入故障。预检失败即停止，不生成通过结论。`report.json` 保存状态和失败阶段。
@@ -30,6 +33,8 @@ python -m scripts.run_local_pilot --output artifacts/local-pilot-my-run
 注入前还会用 `baseline-gate.json` 记录基线是否满足已登记的恢复门槛。错误率、P99、样本量、灰度 QPS 或样本年龄在故障前就不合格时停止，避免在原本不健康的环境上制造无法验证的故障。该检查源于 2026-09-29 的实际试点发现；此前失败尝试的原始结果仍保留。
 
 流量目标 40 请求/秒，其中每 20 个请求有一个进入 canary。r41 正常处理折扣；r42 将 `five` 当整数解析，导致实际 HTTP 500。inventory 仍正常。告警条件为 30 秒灰度错误率 >5% 且稳定组错误率 <1%，持续 4 秒。抓取/规则周期均为 2 秒。
+
+`--scenario downstream` 使用 r43：灰度 inventory 实际返回 HTTP 503，checkout 返回 500；稳定组仍使用 r41。该场景应产生 `NEEDS_ATTENTION`、无回退建议、仅 r41 → r43 的发布记录，并以 `SAFELY_ESCALATED` 结束；若未告警、诊断失败或出现回退建议，则试点失败。它不执行回退，也没有“恢复时间”。
 
 恢复条件在故障前固定：三个连续、不重叠的 30 秒窗口，灰度/稳定组错误率 <1%、P99 <500ms、灰度/对照样本均 ≥20、灰度 QPS ≥基线 2 的 50%、样本年龄 ≤5 秒、目标版本 r41 生效、下游健康；相邻观察间隔不得超过 45 秒。
 

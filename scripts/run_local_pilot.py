@@ -104,6 +104,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, help="A new ignored artifacts directory")
     parser.add_argument("--tools", default="artifacts/local-pilot-tools")
+    parser.add_argument("--scenario", choices=("regression", "downstream"), default="regression")
     args = parser.parse_args()
     root = Path(args.output).resolve()
     artifact_root = Path("artifacts").resolve()
@@ -117,7 +118,7 @@ def main():
     phases, processes, logs = [], [], []
     traffic = None
     iid = None
-    report = {"schema_version": 1, "domain": "LOCAL_LAB", "traffic": "synthetic HTTP workload",
+    report = {"schema_version": 1, "domain": "LOCAL_LAB", "scenario": args.scenario, "traffic": "synthetic HTTP workload",
         "telemetry": "Actual HTTP counters, histograms, release records and OpenTelemetry spans",
         "reasoner": "deterministic-baseline, no LLM", "status": "RUNNING", "scope": SCOPE,
         "runtime": {"python": platform.python_version(), "os": platform.system(), "machine": platform.machine()},
@@ -185,12 +186,17 @@ def main():
         policy = {"window_seconds": WINDOW, "consecutive_windows": 3, "min_requests": 20,
                   "max_sample_age_seconds": 5, "max_error_rate": .01, "max_p99_ms": 500,
                   "min_qps_ratio": .5, "observation_timeout_seconds": 240}
-        plan = {"scenario": "r42 checkout discount parser regression", "warmup_seconds": 40,
+        scenario_name = ("r42 checkout discount parser regression" if args.scenario == "regression"
+                         else "r43 canary inventory dependency failure")
+        fault_revision = "r42" if args.scenario == "regression" else "r43"
+        plan = {"scenario": scenario_name, "warmup_seconds": 40,
             "target_total_rps": 40, "canary_fraction": .05, "baseline_canary_qps": 2,
             "traffic_driver": {"workers": Traffic.WORKERS, "interval_seconds": Traffic.INTERVAL},
             "alert": {"expression": f'({query["error_rate"]}) > 0.05 and ({query["control_error_rate"]}) < 0.01', "for": "4s"},
             "recovery_policy": policy, "allowed_data": ["aggregate request metrics", "synthetic request spans", "local release records"],
-            "fault_target": "Local lab only", "human_decision_required": True, "control_group_for_mttr": False}
+            "fault_target": "Local lab only", "human_decision_required": args.scenario == "regression",
+            "expected_outcome": "recovery_after_human_rollback" if args.scenario == "regression" else "no_rollback_recommendation",
+            "control_group_for_mttr": False}
         write(root / "plan.json", plan)
         config = {"services": [{"id": "checkout", "scope": SCOPE, "owner": "local-pilot operator", "mode": "READ_ONLY",
             "prometheus_url": prom_url, "evidence_url": service_url + "/evidence", "evidence_token_env": "MTTR_LAB_EVIDENCE_TOKEN",
@@ -273,8 +279,8 @@ def main():
         if not all(baseline_checks.values()):
             raise ValueError("Baseline is not healthy under the registered recovery policy")
         phase("PREFLIGHT_PASSED")
-        released = request(service_url + "/release", tokens["control"], {"expected_revision": "r41", "target_revision": "r42",
-            "actor": "fault-injection-harness", "reason": "Registered local discount parser fault"})
+        released = request(service_url + "/release", tokens["control"], {"expected_revision": "r41", "target_revision": fault_revision,
+            "actor": "fault-injection-harness", "reason": "Registered local fault: " + scenario_name})
         phase("FAULT_INJECTED", **released)
         def find_incident():
             items = request(api_url + "/api/incidents", tokens["operator"])["items"]
@@ -290,41 +296,56 @@ def main():
         write(root / "diagnosis.json", inc)
         capture_prometheus("fault")
         write(root / "fault-evidence.json", request(service_url + "/evidence", tokens["evidence"]))
-        if inc["state"] != "RECOMMENDED":
-            raise ValueError("Workflow did not produce an actionable recommendation")
-        rec = inc["recommendation"]
-        phase("AWAITING_OPERATOR", incident_id=iid, plan_hash=rec["hash"], target_revision=rec["target_revision"],
-              metrics=inc["snapshot"]["metrics"], decision_file=str(root / "decision.json"), expires_at=rec["expires_at"])
-        decision = wait(lambda: json.loads((root / "decision.json").read_text(encoding="utf-8")) if (root / "decision.json").exists() else None,
-                        max(1, min(240, rec["expires_at"] - time.time() - 5)))
-        if decision.get("action") != "rollback" or decision.get("incident_id") != iid or decision.get("plan_hash") != rec["hash"]:
-            report["human_decision"] = decision.get("action")
-            raise ValueError("Human declined or decision does not bind this recommendation")
-        report["human_decision"] = decision
-        def operate(action, body):
-            return request(api_url + f"/api/incidents/{iid}/{action}", tokens["operator"], {"request_id": "local-pilot-" + action, **body})
-        operate("ack", {})
-        operate("review", {"plan_hash": rec["hash"], "decision": "accept", "reason": decision["reason"]})
-        phase("OPERATOR_DECISION_RECORDED")
-        rolled_back = request(service_url + "/release", tokens["control"], {"expected_revision": "r42", "target_revision": "r41",
-            "actor": "operator-via-chat", "reason": decision["reason"]})
-        phase("MANUAL_ROLLBACK_APPLIED", **rolled_back)
-        operate("observe", {"target_revision": "r41", "reason": "Human-approved local rollback completed; verify actual request telemetry"})
-        def finished():
-            candidate = current()
-            return candidate if candidate["state"] in {"RECOVERED", "NEEDS_ATTENTION"} else None
-        final = wait(finished, 270)
-        write(root / "final-incident.json", final)
-        write(root / "timeline.json", request(api_url + f"/api/incidents/{iid}", tokens["operator"])["events"])
-        capture_prometheus("recovery")
-        write(root / "recovery-evidence.json", request(service_url + "/evidence", tokens["evidence"]))
-        audit = backup(root / "pilot.db", root / "verified-backup.db", tokens["audit"].encode())
-        report.update(status=final["state"], incident_id=iid, timeline=final["timeline"],
-            detected_at=final["detected_at"], recovered_at=final.get("recovered_at"),
-            recovery_seconds=final.get("recovery_seconds"), healthy_windows=final.get("healthy_streak"),
-            observations=final.get("observations", []), audit_head=audit["head"], audit_verified=audit["keyed"],
-            case_count=1, source_preflight="passed")
-        phase("COMPLETED", state=final["state"], recovery_seconds=final.get("recovery_seconds"))
+        if args.scenario == "downstream":
+            if inc["state"] != "NEEDS_ATTENTION" or inc.get("recommendation") is not None:
+                raise ValueError("Downstream fault was not safely escalated")
+            release_rows = [json.loads(line) for line in (root / "releases.jsonl").read_text(encoding="utf-8").splitlines()]
+            if [row["after"] for row in release_rows] != ["r41", "r43"]:
+                raise ValueError("Unexpected release occurred during downstream fault")
+            report.update(status="SAFELY_ESCALATED", incident_id=iid, timeline=inc["timeline"],
+                detected_at=inc["detected_at"], recommendation=None, release_count=len(release_rows),
+                case_count=1, source_preflight="passed")
+            write(root / "final-incident.json", inc)
+            write(root / "timeline.json", request(api_url + f"/api/incidents/{iid}", tokens["operator"])["events"])
+            audit = backup(root / "pilot.db", root / "verified-backup.db", tokens["audit"].encode())
+            report.update(audit_head=audit["head"], audit_verified=audit["keyed"])
+            phase("COMPLETED", state="SAFELY_ESCALATED")
+        else:
+            if inc["state"] != "RECOMMENDED":
+                raise ValueError("Workflow did not produce an actionable recommendation")
+            rec = inc["recommendation"]
+            phase("AWAITING_OPERATOR", incident_id=iid, plan_hash=rec["hash"], target_revision=rec["target_revision"],
+                  metrics=inc["snapshot"]["metrics"], decision_file=str(root / "decision.json"), expires_at=rec["expires_at"])
+            decision = wait(lambda: json.loads((root / "decision.json").read_text(encoding="utf-8")) if (root / "decision.json").exists() else None,
+                            max(1, min(240, rec["expires_at"] - time.time() - 5)))
+            if decision.get("action") != "rollback" or decision.get("incident_id") != iid or decision.get("plan_hash") != rec["hash"]:
+                report["human_decision"] = decision.get("action")
+                raise ValueError("Human declined or decision does not bind this recommendation")
+            report["human_decision"] = decision
+            def operate(action, body):
+                return request(api_url + f"/api/incidents/{iid}/{action}", tokens["operator"], {"request_id": "local-pilot-" + action, **body})
+            operate("ack", {})
+            operate("review", {"plan_hash": rec["hash"], "decision": "accept", "reason": decision["reason"]})
+            phase("OPERATOR_DECISION_RECORDED")
+            rolled_back = request(service_url + "/release", tokens["control"], {"expected_revision": "r42", "target_revision": "r41",
+                "actor": "operator-via-chat", "reason": decision["reason"]})
+            phase("MANUAL_ROLLBACK_APPLIED", **rolled_back)
+            operate("observe", {"target_revision": "r41", "reason": "Human-approved local rollback completed; verify actual request telemetry"})
+            def finished():
+                candidate = current()
+                return candidate if candidate["state"] in {"RECOVERED", "NEEDS_ATTENTION"} else None
+            final = wait(finished, 270)
+            write(root / "final-incident.json", final)
+            write(root / "timeline.json", request(api_url + f"/api/incidents/{iid}", tokens["operator"])["events"])
+            capture_prometheus("recovery")
+            write(root / "recovery-evidence.json", request(service_url + "/evidence", tokens["evidence"]))
+            audit = backup(root / "pilot.db", root / "verified-backup.db", tokens["audit"].encode())
+            report.update(status=final["state"], incident_id=iid, timeline=final["timeline"],
+                detected_at=final["detected_at"], recovered_at=final.get("recovered_at"),
+                recovery_seconds=final.get("recovery_seconds"), healthy_windows=final.get("healthy_streak"),
+                observations=final.get("observations", []), audit_head=audit["head"], audit_verified=audit["keyed"],
+                case_count=1, source_preflight="passed")
+            phase("COMPLETED", state=final["state"], recovery_seconds=final.get("recovery_seconds"))
     except Exception as exc:
         report.update(status="FAILED", failure_phase=phases[-1]["phase"] if phases else "startup", error_type=type(exc).__name__)
         if iid is not None:
@@ -371,13 +392,13 @@ def main():
         report["phases"] = phases
         report["artifacts_sha256"] = {}
         for name in ("plan.json", "spans.jsonl", "releases.jsonl", "preflight.json", "baseline-gate.json", "baseline-prometheus.json", "fault-prometheus.json",
-                     "recovery-prometheus.json", "diagnosis.json", "final-incident.json", "timeline.json", "decision.json"):
+                     "fault-evidence.json", "recovery-prometheus.json", "diagnosis.json", "final-incident.json", "timeline.json", "decision.json"):
             path = root / name
             if path.exists():
                 report["artifacts_sha256"][name] = hashlib.sha256(path.read_bytes()).hexdigest()
         write(root / "report.json", report)
         print(json.dumps({"status": report["status"], "report": str(root / "report.json")}), flush=True)
-    return 0 if report["status"] == "RECOVERED" else 1
+    return 0 if report["status"] in {"RECOVERED", "SAFELY_ESCALATED"} else 1
 
 
 if __name__ == "__main__":

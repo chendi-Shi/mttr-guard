@@ -97,3 +97,33 @@ class LocalPilotServiceTests(unittest.TestCase):
         self.release("r41", "r42")
         self.assertEqual(checkout(), (200, {"total": 95, "revision": "r41"}))
         self.assertIs(connection.sock, original_socket)
+
+    def test_downstream_fault_is_visible_in_real_http_trace(self):
+        for _ in range(22):
+            request(self.base + "/checkout?track=canary")
+        self.release("r43", "r41")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            request(self.base + "/checkout?track=canary")
+        self.assertEqual(caught.exception.code, 500)
+        caught.exception.close()
+        self.assertEqual(request(self.base + "/checkout?track=stable")["revision"], "r41")
+        evidence = request(self.base + "/evidence", "test-evidence")
+        self.assertFalse(evidence["traces"]["downstream_healthy"])
+        self.assertEqual(evidence["traces"]["failing_span"], "none")
+        rows = self.lab.exporter.snapshot(time.time())
+        failure = next(row for row in rows if row["name"] == "inventory.lookup" and row["status"] == "ERROR")
+        parent = next(row for row in rows if row["span_id"] == failure["parent_span_id"])
+        self.assertEqual(parent["name"], "checkout.request")
+        self.assertEqual(parent["trace_id"], failure["trace_id"])
+
+    def test_failed_inventory_response_does_not_poison_next_stable_request(self):
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        self.addCleanup(connection.close)
+        self.release("r43", "r41")
+        def checkout(track):
+            connection.request("GET", "/checkout?track=" + track)
+            response = connection.getresponse()
+            return response.status, json.loads(response.read())
+        for _ in range(3):
+            self.assertEqual(checkout("canary")[0], 500)
+            self.assertEqual(checkout("stable"), (200, {"total": 95, "revision": "r41"}))

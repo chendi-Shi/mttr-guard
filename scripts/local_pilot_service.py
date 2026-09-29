@@ -87,7 +87,7 @@ class Lab:
         self.control_token, self.evidence_token = control_token, evidence_token
         self.lock = threading.Lock()
         self.revision, self.previous, self.changed = "r41", "r40", time.time()
-        self.counts = {"r41": {"ok": 0, "error": 0}, "r42": {"ok": 0, "error": 0}}
+        self.counts = {revision: {"ok": 0, "error": 0} for revision in ("r41", "r42", "r43")}
         self.exporter = SpanLog(self.root)
         self.provider = TracerProvider(resource=Resource.create({"service.name": "checkout-local-pilot"}))
         self.provider.add_span_processor(SimpleSpanProcessor(self.exporter))
@@ -112,7 +112,7 @@ class Lab:
 
     def release(self, body):
         if (set(body) != {"expected_revision", "target_revision", "actor", "reason"}
-                or body["target_revision"] not in {"r41", "r42"}
+                or body["target_revision"] not in {"r41", "r42", "r43"}
                 or any(not isinstance(body[k], str) or not 1 <= len(body[k]) <= 300 for k in body)):
             raise ValueError("Invalid release request")
         with self.lock:
@@ -207,9 +207,12 @@ def make_server(lab, port):
             if parsed.path == "/inventory":
                 with lab.tracer.start_as_current_span("inventory.lookup", context=context, kind=trace.SpanKind.SERVER) as span:
                     span.set_attribute("track", track)
-                    span.set_attribute("http.status_code", 200)
-                    span.set_status(Status(StatusCode.OK))
-                    self.respond(200, {"available": True})
+                    with lab.lock:
+                        unavailable = track == "canary" and lab.revision == "r43"
+                    status = 503 if unavailable else 200
+                    span.set_attribute("http.status_code", status)
+                    span.set_status(Status(StatusCode.ERROR if unavailable else StatusCode.OK))
+                    self.respond(status, {"available": not unavailable})
                 return
             started = time.perf_counter()
             with lab.lock:
@@ -228,7 +231,8 @@ def make_server(lab, port):
                     try:
                         connection.request("GET", "/inventory?track=" + track, headers=headers)
                         response = connection.getresponse()
-                        available = json.loads(response.read())["available"] if response.status == 200 else False
+                        payload = response.read()
+                        available = json.loads(payload)["available"] if response.status == 200 else False
                         if not available:
                             raise ValueError("Inventory unavailable")
                     except (OSError, http.client.HTTPException):
