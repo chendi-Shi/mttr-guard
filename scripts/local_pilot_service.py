@@ -5,6 +5,7 @@ The evidence endpoint reads completed spans and actual release records.
 """
 import argparse
 import hmac
+import http.client
 import json
 import os
 import threading
@@ -143,8 +144,18 @@ class Lab:
 
 def make_server(lab, port):
     class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def log_message(self, *_):
             pass
+
+        def finish(self):
+            try:
+                super().finish()
+            finally:
+                connection = getattr(self, "inventory_connection", None)
+                if connection is not None:
+                    connection.close()
 
         def respond(self, status, body, content_type="application/json"):
             raw = body if isinstance(body, bytes) else json.dumps(body).encode()
@@ -210,11 +221,20 @@ def make_server(lab, port):
                 try:
                     headers = {}
                     propagate.inject(headers)
-                    req = urllib.request.Request(f"http://127.0.0.1:{self.server.server_port}/inventory?track={track}", headers=headers)
-                    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                    with opener.open(req, timeout=2) as response:
-                        if not json.load(response)["available"]:
+                    connection = getattr(self, "inventory_connection", None)
+                    if connection is None:
+                        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=2)
+                        self.inventory_connection = connection
+                    try:
+                        connection.request("GET", "/inventory?track=" + track, headers=headers)
+                        response = connection.getresponse()
+                        available = json.loads(response.read())["available"] if response.status == 200 else False
+                        if not available:
                             raise ValueError("Inventory unavailable")
+                    except (OSError, http.client.HTTPException):
+                        connection.close()
+                        self.inventory_connection = None
+                        raise
                     with lab.tracer.start_as_current_span("checkout.validate") as child:
                         child.set_attribute("track", track)
                         child.set_attribute("revision", revision)
@@ -222,7 +242,7 @@ def make_server(lab, port):
                         discount = int("five" if revision == "r42" else "5")
                         total = 100 - discount
                     body = {"total": total, "revision": revision}
-                except (ValueError, OSError) as exc:
+                except (ValueError, OSError, http.client.HTTPException) as exc:
                     status, body = 500, {"error": type(exc).__name__, "revision": revision}
                     root.record_exception(exc)
                     root.set_status(Status(StatusCode.ERROR))

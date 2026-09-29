@@ -4,6 +4,7 @@ Waits for a human decision file after recommendation; never auto-approves rollba
 """
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import platform
@@ -68,23 +69,27 @@ class Traffic:
 
     def run(self, offset):
         self.stop.wait(offset)
+        parsed = urllib.parse.urlsplit(self.base)
+        connection = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=5)
         while not self.stop.is_set():
             started = time.monotonic()
             with self.lock:
                 self.sequence += 1
                 track = "canary" if self.sequence % 20 == 0 else "stable"
             try:
-                request(self.base + "/checkout?track=" + track)
-                code = "200"
-            except urllib.error.HTTPError as exc:
-                code = str(exc.code)
-                exc.close()
+                connection.request("GET", "/checkout?track=" + track)
+                response = connection.getresponse()
+                code = str(response.status)
+                response.read()
             except Exception as exc:
                 code = type(exc).__name__
+                connection.close()
+                connection = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=5)
             with self.lock:
                 key = track + "/" + code
                 self.results[key] = self.results.get(key, 0) + 1
             self.stop.wait(max(0, self.INTERVAL - (time.monotonic() - started)))
+        connection.close()
 
     def start(self):
         for index in range(self.WORKERS):

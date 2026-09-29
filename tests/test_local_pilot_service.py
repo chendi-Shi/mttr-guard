@@ -1,5 +1,6 @@
 """Check that lab evidence comes from actual handled requests, not canned fixtures."""
 import importlib.util
+import http.client
 import json
 import tempfile
 import threading
@@ -79,3 +80,20 @@ class LocalPilotServiceTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 409)
         caught.exception.close()
         self.assertEqual(request(self.base + "/status")["revision"], "r41")
+
+    def test_persistent_checkout_connection_survives_fault_and_rollback(self):
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        self.addCleanup(connection.close)
+        def checkout():
+            connection.request("GET", "/checkout?track=canary")
+            response = connection.getresponse()
+            return response.status, json.loads(response.read())
+        self.assertEqual(checkout(), (200, {"total": 95, "revision": "r41"}))
+        original_socket = connection.sock
+        self.assertIsNotNone(original_socket)
+        self.release("r42", "r41")
+        self.assertEqual(checkout()[0], 500)
+        self.assertIs(connection.sock, original_socket)
+        self.release("r41", "r42")
+        self.assertEqual(checkout(), (200, {"total": 95, "revision": "r41"}))
+        self.assertIs(connection.sock, original_socket)

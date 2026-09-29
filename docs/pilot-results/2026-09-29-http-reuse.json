@@ -1,0 +1,319 @@
+{
+  "schema_version": 1,
+  "domain": "LOCAL_LAB",
+  "traffic": "synthetic HTTP workload",
+  "telemetry": "Actual HTTP counters, histograms, release records and OpenTelemetry spans",
+  "reasoner": "deterministic-baseline, no LLM",
+  "status": "RECOVERED",
+  "scope": {
+    "tenant": "local-lab",
+    "environment": "local-pilot",
+    "cluster": "loopback",
+    "namespace": "experiment",
+    "service": "checkout"
+  },
+  "runtime": {
+    "python": "3.14.7",
+    "os": "Windows",
+    "machine": "AMD64"
+  },
+  "claims": {
+    "production_readiness": "not_assessed",
+    "causal_mttr_reduction": "not_established",
+    "human_effort": "Not measured separately from chat/tool waiting time"
+  },
+  "human_decision": {
+    "action": "rollback",
+    "incident_id": "4333f0fe48504de99a71e1db7f233d3d",
+    "plan_hash": "036ceb483f6ae3936b402e1d63540b01c939c1d3f1e01cc354d9256c1e8a5c71",
+    "actor": "chat:user",
+    "recorded_at": 1790651145.2928364,
+    "user_instruction": "退吧，",
+    "authorization_timing": "User accepted the same local r42 to r41 scenario after the prior recommendation expired; fresh preflight, scope, version, metrics and traces were rechecked before execution.",
+    "reason": "User explicitly requested rollback for this local checkout r42 canary regression; fresh evidence reconfirmed healthy stable traffic, failing checkout.validate, healthy dependency and known-good r41."
+  },
+  "incident_id": "4333f0fe48504de99a71e1db7f233d3d",
+  "timeline": {
+    "acknowledged": 1790651145.6451335,
+    "analysis_ready": 1790651111.5973365,
+    "evidence_ready": 1790651110.9789371,
+    "mitigation_reported": 1790651146.242974,
+    "received": 1790651109.239223,
+    "recommendation_ready": 1790651111.5973365,
+    "reviewed": 1790651145.8985205,
+    "verified_recovery": 1790651241.0209727
+  },
+  "detected_at": 1790651107.999,
+  "recovered_at": 1790651241.0209727,
+  "recovery_seconds": 133.02197265625,
+  "healthy_windows": 3,
+  "observations": [
+    {
+      "at": 1790651178.131799,
+      "evidence_digest": "323f5def470533503095872455b04169e808fb74843fb40130be02a51bf571b7",
+      "healthy": true,
+      "metrics": {
+        "control_error_rate": 0.0,
+        "control_requests": 1108.8097703817448,
+        "error_rate": 0.0,
+        "p99_ms": 9.916666666666668,
+        "qps": 1.9640752776488233,
+        "requests": 58.922258329464704,
+        "sample_age_seconds": 1.5033986568450928
+      },
+      "reasons": [],
+      "revision": "r41"
+    },
+    {
+      "at": 1790651209.3299549,
+      "evidence_digest": "b2cf7dc88ce78d60434e3bf5969ece69188fa17a2e2e422c49efa3f031e6de00",
+      "healthy": true,
+      "metrics": {
+        "control_error_rate": 0.0,
+        "control_requests": 1101.7917053322863,
+        "error_rate": 0.0,
+        "p99_ms": 20.875000000000007,
+        "qps": 1.963023770433293,
+        "requests": 58.89071311299878,
+        "sample_age_seconds": 0.5851714611053467
+      },
+      "reasons": [],
+      "revision": "r41"
+    },
+    {
+      "at": 1790651241.0209727,
+      "evidence_digest": "08f74d98dde743619118e49d10822c1c900968e1c57767fce0f302bb6dcb5285",
+      "healthy": true,
+      "metrics": {
+        "control_error_rate": 0.0,
+        "control_requests": 1092.857142857143,
+        "error_rate": 0.0,
+        "p99_ms": 9.831249999999999,
+        "qps": 1.9285714285714284,
+        "requests": 57.857142857142854,
+        "sample_age_seconds": 0.5631849765777588
+      },
+      "reasons": [],
+      "revision": "r41"
+    }
+  ],
+  "audit_head": {
+    "seq": 82,
+    "signature": "a3688230e706d4995a0ba85395745e5976c636bb63e38fe47d3795f7598d1f6e"
+  },
+  "audit_verified": true,
+  "case_count": 1,
+  "source_preflight": "passed",
+  "http_outcomes": {
+    "stable/200": 6850,
+    "canary/200": 271,
+    "canary/500": 89
+  },
+  "span_writer_flushed": true,
+  "monitoring_data_storage": "OS temporary directory during live trial; captured query responses and span log retained in ignored artifacts",
+  "owned_processes_stopped": true,
+  "elapsed_seconds": 197.984069108963,
+  "artifacts_sha256": {
+    "plan.json": "8fe5611306c4cdec91f91770e4488195194bd1ce2eee97e35ecd8bab1d481ec6",
+    "spans.jsonl": "4003f6097e5876669a902127550c4949707bf158abe864255fe36fe97d19e950",
+    "releases.jsonl": "e206087e961dd1d08646689a4177ad4449384126a686612bea70a1dde2af2670",
+    "preflight.json": "fb561508f64b83042f2e835254b79d907d5b271f5df5af77ad421c9aa81b57ce",
+    "baseline-gate.json": "0d8fd36b030943b56516e2df942c667e755fd1fa02c9bb9698d947f8662aa877",
+    "baseline-prometheus.json": "c7c96c5d27b30aaea5a635517f2032f8a365753be09e3bb416c0a40b3844a5ff",
+    "fault-prometheus.json": "48fb567c3875b667904d1d458058c74a7afe33a87d65305e60da556331961d31",
+    "recovery-prometheus.json": "f58d479a71ff6964c28c5bc066c122c22c8e38777af493cb3ab93f9158b267c1",
+    "diagnosis.json": "a6bd7453a4812701d20372c433bbaa27b9a77b8b2d78ad9a1c44a048686e9c5d",
+    "final-incident.json": "7bae37c98646c6fc8c4e4f7c54378eb47d1eee2a19981e2ac12b9f5ccf5a0497",
+    "timeline.json": "3b2b161d5fa96fa90597266338757da6f965802e872967c297f08123fdac8c8a",
+    "decision.json": "f150fcb04fbc3408271b8e644127fdf1857e6f9b5494eb21bc1f549bc9e2426e"
+  },
+  "phases": [
+    {
+      "phase": "CONFIGURING",
+      "at": 1790651045.7107842
+    },
+    {
+      "phase": "WARMING_UP",
+      "at": 1790651055.821929
+    },
+    {
+      "phase": "PREFLIGHT_PASSED",
+      "at": 1790651099.7005942
+    },
+    {
+      "phase": "FAULT_INJECTED",
+      "at": 1790651099.782875,
+      "revision": "r42",
+      "changed_at": 1790651099.7795165
+    },
+    {
+      "phase": "AWAITING_OPERATOR",
+      "at": 1790651113.4588768,
+      "incident_id": "4333f0fe48504de99a71e1db7f233d3d",
+      "plan_hash": "036ceb483f6ae3936b402e1d63540b01c939c1d3f1e01cc354d9256c1e8a5c71",
+      "target_revision": "r41",
+      "metrics": {
+        "control_error_rate": 0.0,
+        "control_requests": 1096.6728544909324,
+        "error_rate": 0.37413113280368393,
+        "p99_ms": 22.299999999999986,
+        "qps": 1.8822897329715835,
+        "requests": 56.468691989147516,
+        "sample_age_seconds": 0.48872900009155273
+      },
+      "expires_at": 1790651411.5973365
+    },
+    {
+      "phase": "OPERATOR_DECISION_RECORDED",
+      "at": 1790651145.931961
+    },
+    {
+      "phase": "MANUAL_ROLLBACK_APPLIED",
+      "at": 1790651146.1210163,
+      "revision": "r41",
+      "changed_at": 1790651146.105091
+    },
+    {
+      "phase": "COMPLETED",
+      "at": 1790651242.8014011,
+      "state": "RECOVERED",
+      "recovery_seconds": 133.02197265625
+    }
+  ],
+  "preflight": {
+    "schema_version": 1,
+    "status": "source_contract_passed",
+    "scope": {
+      "tenant": "local-lab",
+      "environment": "local-pilot",
+      "cluster": "loopback",
+      "namespace": "experiment",
+      "service": "checkout"
+    },
+    "mode": "READ_ONLY",
+    "checked_at": "2026-09-29T03:04:59.134150+00:00",
+    "collection_hash": "94c1dfb1739c7a41ffba87ead0a17976cae53ccf1f78087b7d4c61fc37e84a36",
+    "snapshot_sha256": "afb9d8e832d289ea1f48d9c911cd71b707823354c0735131290f555da4323011",
+    "sample_age_seconds": 0.7248213291168213,
+    "sufficient_samples": true,
+    "metrics": {
+      "error_rate": 0.0,
+      "control_error_rate": 0.0,
+      "p99_ms": 16.900000000000034,
+      "qps": 1.9283648180552084,
+      "requests": 57.850944541656254,
+      "control_requests": 1093.8113773524265,
+      "sample_age_seconds": 0.7248213291168213
+    },
+    "recovery_policy": {
+      "max_error_rate": 0.01,
+      "max_p99_ms": 500,
+      "min_qps_ratio": 0.5,
+      "min_requests": 20,
+      "window_seconds": 30,
+      "consecutive_windows": 3,
+      "max_sample_age_seconds": 5,
+      "observation_timeout_seconds": 240
+    },
+    "trace_sample_count": 57,
+    "elapsed_seconds": 1.6610000000000582,
+    "claims": {
+      "production_capacity": "not_assessed",
+      "mttr_reduction": "not_assessed",
+      "source_authenticity": "Configured source declaration; requires operator verification"
+    },
+    "limitation": "One point-in-time read of configured evidence; no fault injection, IAM integration or deployment writes"
+  },
+  "diagnosis_metrics": {
+    "control_error_rate": 0.0,
+    "control_requests": 1096.6728544909324,
+    "error_rate": 0.37413113280368393,
+    "p99_ms": 22.299999999999986,
+    "qps": 1.8822897329715835,
+    "requests": 56.468691989147516,
+    "sample_age_seconds": 0.48872900009155273
+  },
+  "diagnosis_traces": {
+    "downstream_healthy": true,
+    "failing_span": "checkout.validate",
+    "sample_count": 57
+  },
+  "diagnosis_deployment": {
+    "changed_at": 1790651099.7795165,
+    "known_good": true,
+    "previous_revision": "r41",
+    "revision": "r42",
+    "rollout_complete": true,
+    "schema_migration": false,
+    "traffic_percent": 5
+  },
+  "spans": {
+    "total": 21630,
+    "failed_validate": 89,
+    "failures_with_matching_parent": 89
+  },
+  "audit": {
+    "head": {
+      "seq": 82,
+      "signature": "a3688230e706d4995a0ba85395745e5976c636bb63e38fe47d3795f7598d1f6e"
+    },
+    "keyed": true,
+    "records": 82,
+    "verified_states": 1,
+    "incidents": 1,
+    "pending_jobs": 0
+  },
+  "releases": [
+    {
+      "at": 1790651053.8076665,
+      "actor": "bootstrap",
+      "before": "r40",
+      "after": "r41",
+      "reason": "Initial local test service",
+      "scope": {
+        "tenant": "local-lab",
+        "environment": "local-pilot",
+        "cluster": "loopback",
+        "namespace": "experiment",
+        "service": "checkout"
+      },
+      "environment_type": "LOCAL_LAB"
+    },
+    {
+      "at": 1790651099.7795165,
+      "actor": "fault-injection-harness",
+      "before": "r41",
+      "after": "r42",
+      "reason": "Registered local discount parser fault",
+      "scope": {
+        "tenant": "local-lab",
+        "environment": "local-pilot",
+        "cluster": "loopback",
+        "namespace": "experiment",
+        "service": "checkout"
+      },
+      "environment_type": "LOCAL_LAB"
+    },
+    {
+      "at": 1790651146.105091,
+      "actor": "operator-via-chat",
+      "before": "r42",
+      "after": "r41",
+      "reason": "User explicitly requested rollback for this local checkout r42 canary regression; fresh evidence reconfirmed healthy stable traffic, failing checkout.validate, healthy dependency and known-good r41.",
+      "scope": {
+        "tenant": "local-lab",
+        "environment": "local-pilot",
+        "cluster": "loopback",
+        "namespace": "experiment",
+        "service": "checkout"
+      },
+      "environment_type": "LOCAL_LAB"
+    }
+  ],
+  "seconds": {
+    "alert_to_recommendation": 3.5983364582061768,
+    "receipt_to_recommendation": 2.3581135272979736,
+    "rollback_to_verified_recovery": 94.89995646476746,
+    "operator_wait_including_chat_and_tools": 32.47308421134949
+  }
+}
